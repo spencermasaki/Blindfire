@@ -165,6 +165,11 @@
                 <StackPanel>
                     <TextBlock x:Name="ResultsHeadingText" Text="Calibration Results" FontSize="28" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,16"/>
                     <TextBlock x:Name="RecommendationText" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,0,0,16" TextWrapping="Wrap"/>
+                    <StackPanel x:Name="SpeedAdjustPanel" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,16">
+                        <TextBlock Text="Speed" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource TextSecondaryBrush}"/>
+                        <Slider x:Name="SpeedSlider" Width="200" Minimum="0.5" Maximum="2.0" Value="1.0" VerticalAlignment="Center" ValueChanged="OnSpeedSliderChanged"/>
+                        <TextBlock x:Name="SpeedValueText" Text="1.00x" Width="48" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{StaticResource TextSecondaryBrush}"/>
+                    </StackPanel>
                     <Button x:Name="DetailsToggleButton" Content="&#9662; More details" HorizontalAlignment="Center" Margin="0,0,0,12"
                             Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextSecondaryBrush}" Click="OnDetailsToggleClicked"/>
                     <StackPanel x:Name="DetailsPanel" Visibility="Collapsed">
