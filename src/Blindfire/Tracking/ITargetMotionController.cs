@@ -10,4 +10,9 @@ public interface ITargetMotionController
     ScreenPoint Position { get; }
 
     void Advance(double deltaTimeSeconds);
+
+    // Pure extrapolation from the current position/heading, used only to draw
+    // a short "here's where it's about to go" preview before the hold
+    // starts - doesn't mutate any state, so it's safe to call repeatedly.
+    ScreenPoint PeekAhead(double secondsAhead);
 }

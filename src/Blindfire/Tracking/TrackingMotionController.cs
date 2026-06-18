@@ -44,6 +44,17 @@ public sealed class TrackingMotionController : ITargetMotionController
 
     public ScreenPoint Position { get; private set; }
 
+    public ScreenPoint PeekAhead(double secondsAhead)
+    {
+        var dx = Math.Cos(_headingRadians) * _speed * secondsAhead;
+        var dy = Math.Sin(_headingRadians) * _speed * secondsAhead;
+
+        var x = Clamp(Position.X + dx, EdgeMargin, _screenWidth - EdgeMargin);
+        var y = Clamp(Position.Y + dy, EdgeMargin, _screenHeight - EdgeMargin);
+
+        return new ScreenPoint(x, y);
+    }
+
     public void Advance(double deltaTimeSeconds)
     {
         _timeUntilRetarget -= deltaTimeSeconds;

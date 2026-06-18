@@ -31,6 +31,8 @@ public partial class MainWindow : Window
     private const double ScreenPixelsPerInch = 96.0;
     private const int TotalTrialCount = 30;
     private const double TargetFps = 60.0;
+    private const double TrackingPreviewAheadSeconds = 0.6;
+    private const double TrackingPreviewStartOpacity = 0.45;
 
     // Fallback footprint if the results card hasn't been laid out yet;
     // normally the exclusion zone is measured from its actual rendered size
@@ -243,6 +245,7 @@ public partial class MainWindow : Window
         TargetBEllipse.Visibility = Visibility.Collapsed;
 
         StopTrackingRenderLoop();
+        StopTrackingPreview();
         _trackingActive = false;
         _awaitingTrackingPress = false;
         _activeStrafeController = null;
@@ -301,7 +304,7 @@ public partial class MainWindow : Window
                     Cursor = Cursors.None;
                     DimTargetA();
                     ShowTargetB(_runner.Definition.TargetBPosition);
-                    ShowDirectionPrompt(_runner.Definition.Direction);
+                    ShowSecondClickPrompt();
                 }
 
                 break;
@@ -355,6 +358,7 @@ public partial class MainWindow : Window
         _awaitingTrackingPress = false;
         _trackingActive = true;
         TrackingInstructionPanel.Visibility = Visibility.Collapsed;
+        StopTrackingPreview();
         Cursor = Cursors.None;
 
         _accumulator.Reset();
@@ -766,17 +770,10 @@ public partial class MainWindow : Window
         TargetBEllipse.Visibility = Visibility.Visible;
     }
 
-    private void ShowDirectionPrompt(Direction direction)
+    private void ShowSecondClickPrompt()
     {
         var colorWord = _isAdsPhase ? "magenta" : "blue";
-        var baseText = direction switch
-        {
-            Direction.LeftToRight => $"Drag to the {colorWord} target →",
-            Direction.RightToLeft => $"← Drag to the {colorWord} target",
-            Direction.UpToDown => $"Drag to the {colorWord} target ↓",
-            Direction.DownToUp => $"↑ Drag to the {colorWord} target",
-            _ => $"Drag to the {colorWord} target",
-        };
+        var baseText = $"Click the {colorWord} target";
         PromptText.Text = _isAdsPhase ? $"Hold RMB - {baseText}" : baseText;
         PromptSubText.Text = "This is a feel test, not a sight test - don't try to peek. Your cursor re-centers once you click, so you won't see where it actually landed.";
         PromptPanel.Visibility = Visibility.Visible;
@@ -909,6 +906,46 @@ public partial class MainWindow : Window
 
         PositionTrackingTarget(startPosition);
         _awaitingTrackingPress = true;
+        StartTrackingPreview();
+    }
+
+    // Briefly previews where the target is about to head before the user has
+    // committed to a press, so the first real movement isn't a total
+    // surprise - a dim ghost slides from the target's current position along
+    // its current heading and fades out, looping until the hold begins.
+    private void StartTrackingPreview()
+    {
+        var start = _trackingMotion!.Position;
+        var ahead = _trackingMotion.PeekAhead(TrackingPreviewAheadSeconds);
+        var duration = TimeSpan.FromSeconds(TrackingPreviewAheadSeconds);
+
+        TrackingPreviewGhost.Fill = TrackingTargetEllipse.Fill;
+        TrackingPreviewGhost.Visibility = Visibility.Visible;
+
+        var leftAnim = new DoubleAnimation(start.X - (TrackingPreviewGhost.Width / 2), ahead.X - (TrackingPreviewGhost.Width / 2), duration)
+        {
+            RepeatBehavior = RepeatBehavior.Forever,
+        };
+        var topAnim = new DoubleAnimation(start.Y - (TrackingPreviewGhost.Height / 2), ahead.Y - (TrackingPreviewGhost.Height / 2), duration)
+        {
+            RepeatBehavior = RepeatBehavior.Forever,
+        };
+        var opacityAnim = new DoubleAnimation(TrackingPreviewStartOpacity, 0.0, duration)
+        {
+            RepeatBehavior = RepeatBehavior.Forever,
+        };
+
+        TrackingPreviewGhost.BeginAnimation(Canvas.LeftProperty, leftAnim);
+        TrackingPreviewGhost.BeginAnimation(Canvas.TopProperty, topAnim);
+        TrackingPreviewGhost.BeginAnimation(OpacityProperty, opacityAnim);
+    }
+
+    private void StopTrackingPreview()
+    {
+        TrackingPreviewGhost.BeginAnimation(Canvas.LeftProperty, null);
+        TrackingPreviewGhost.BeginAnimation(Canvas.TopProperty, null);
+        TrackingPreviewGhost.BeginAnimation(OpacityProperty, null);
+        TrackingPreviewGhost.Visibility = Visibility.Collapsed;
     }
 
     private void HidePrompt()

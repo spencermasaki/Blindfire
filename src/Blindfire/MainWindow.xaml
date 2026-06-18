@@ -104,6 +104,7 @@
         <!-- TRACKING -->
         <Grid x:Name="TrackingPanel" Visibility="Collapsed">
             <Canvas x:Name="TrackingCanvas">
+                <Ellipse x:Name="TrackingPreviewGhost" Width="40" Height="40" Stroke="White" StrokeThickness="1" Visibility="Collapsed" IsHitTestVisible="False"/>
                 <Ellipse x:Name="TrackingTargetEllipse" Width="60" Height="60" Fill="{StaticResource TrackingBrush}" Stroke="White" StrokeThickness="3">
                     <Ellipse.Effect>
                         <DropShadowEffect Color="{StaticResource TrackingColor}" BlurRadius="25" ShadowDepth="0" Opacity="0.85"/>

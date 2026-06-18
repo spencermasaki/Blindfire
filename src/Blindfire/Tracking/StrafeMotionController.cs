@@ -39,6 +39,13 @@ public sealed class StrafeMotionController : ITargetMotionController
 
     public int CurrentDirection { get; private set; }
 
+    public ScreenPoint PeekAhead(double secondsAhead)
+    {
+        var dx = CurrentDirection * Speed * secondsAhead;
+        var x = Math.Max(EdgeMargin, Math.Min(_screenWidth - EdgeMargin, Position.X + dx));
+        return new ScreenPoint(x, _fixedY);
+    }
+
     public void Advance(double deltaTimeSeconds)
     {
         _timeUntilReversal -= deltaTimeSeconds;
