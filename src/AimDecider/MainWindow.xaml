@@ -1,0 +1,179 @@
+<Window x:Class="AimDecider.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:AimDecider"
+        mc:Ignorable="d"
+        Title="AimDecider"
+        WindowStyle="None"
+        WindowStartupLocation="Manual"
+        ResizeMode="NoResize"
+        ShowInTaskbar="True"
+        Background="{StaticResource BackgroundGradientBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}">
+    <Grid x:Name="RootGrid">
+
+        <!-- START -->
+        <StackPanel x:Name="StartPanel" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="540">
+            <TextBlock Text="Aim Sensitivity Trainer" FontSize="34" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,20"/>
+            <TextBlock TextWrapping="Wrap" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,0,0,24">
+                One continuous suite of 30 mixed trials: hipfire flicks, ADS flicks (hold right mouse), and short tracking holds, all shuffled together.
+                For flick trials, click the red target, then move the mouse - without seeing your cursor - to match the gap to the second target, then click again.
+                For tracking trials, click and hold the moving target and follow it by feel. Press ESC any time to abort.
+            </TextBlock>
+
+            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource SurfaceBorderBrush}" BorderThickness="1"
+                    CornerRadius="12" Padding="20" Margin="0,0,0,24">
+                <StackPanel>
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="120"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Horizontal FOV (degrees, matches your in-game setting)" VerticalAlignment="Center"/>
+                        <TextBox x:Name="FovDegreesBox" Grid.Column="1" Text="70"/>
+                    </Grid>
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12">
+                        Apex's PC default is 70 (range 70-110; consoles default to 90). Source-engine FOV scaling across aspect ratios is approximate here.
+                    </TextBlock>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="120"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Mouse DPI (for cm/360)" VerticalAlignment="Center"/>
+                        <TextBox x:Name="DpiBox" Grid.Column="1" Text="800"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <TextBlock x:Name="StartValidationText" Foreground="#FF8080" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Button x:Name="BeginButton" Content="Begin Calibration" FontSize="18" Style="{StaticResource AccentButtonStyle}" Margin="0,0,12,0" Click="OnBeginClicked"/>
+                <Button x:Name="ExitButton" Content="Exit" FontSize="18" Click="OnExitClicked"/>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- TRIAL -->
+        <Grid x:Name="TrialPanel" Visibility="Collapsed">
+            <Canvas x:Name="TrialCanvas">
+                <Ellipse x:Name="TargetEllipse" Width="60" Height="60" Fill="{StaticResource TargetABrush}" Stroke="White" StrokeThickness="3" Visibility="Collapsed">
+                    <Ellipse.Effect>
+                        <DropShadowEffect Color="{StaticResource TargetAColor}" BlurRadius="25" ShadowDepth="0" Opacity="0.85"/>
+                    </Ellipse.Effect>
+                    <Ellipse.Triggers>
+                        <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                            <BeginStoryboard>
+                                <Storyboard RepeatBehavior="Forever">
+                                    <DoubleAnimation Storyboard.TargetProperty="Effect.Opacity" From="0.5" To="0.95" Duration="0:0:1.2" AutoReverse="True"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Ellipse.Triggers>
+                </Ellipse>
+                <Ellipse x:Name="TargetBEllipse" Width="60" Height="60" Fill="{StaticResource TargetBBrush}" Stroke="White" StrokeThickness="3" Visibility="Collapsed">
+                    <Ellipse.Effect>
+                        <DropShadowEffect Color="{StaticResource TargetBColor}" BlurRadius="25" ShadowDepth="0" Opacity="0.85"/>
+                    </Ellipse.Effect>
+                    <Ellipse.Triggers>
+                        <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                            <BeginStoryboard>
+                                <Storyboard RepeatBehavior="Forever">
+                                    <DoubleAnimation Storyboard.TargetProperty="Effect.Opacity" From="0.5" To="0.95" Duration="0:0:1.2" AutoReverse="True"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Ellipse.Triggers>
+                </Ellipse>
+            </Canvas>
+
+            <StackPanel x:Name="PromptPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
+                <TextBlock x:Name="PromptText" FontSize="30" FontWeight="Bold" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="PromptSubText" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"
+                           TextAlignment="Center" TextWrapping="Wrap" MaxWidth="520" Margin="0,10,0,0"/>
+            </StackPanel>
+
+            <StackPanel x:Name="ResultFeedbackPanel" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,40" Visibility="Collapsed">
+                <TextBlock x:Name="ResultFeedbackText" FontSize="18" HorizontalAlignment="Center" TextAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- TRACKING -->
+        <Grid x:Name="TrackingPanel" Visibility="Collapsed">
+            <Canvas x:Name="TrackingCanvas">
+                <Ellipse x:Name="TrackingTargetEllipse" Width="60" Height="60" Fill="{StaticResource TrackingBrush}" Stroke="White" StrokeThickness="3">
+                    <Ellipse.Effect>
+                        <DropShadowEffect Color="{StaticResource TrackingColor}" BlurRadius="25" ShadowDepth="0" Opacity="0.85"/>
+                    </Ellipse.Effect>
+                    <Ellipse.Triggers>
+                        <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                            <BeginStoryboard>
+                                <Storyboard RepeatBehavior="Forever">
+                                    <DoubleAnimation Storyboard.TargetProperty="Effect.Opacity" From="0.5" To="0.95" Duration="0:0:1.2" AutoReverse="True"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Ellipse.Triggers>
+                </Ellipse>
+                <TextBlock x:Name="TrackingCountdownText" Width="60" Height="60" FontSize="20" FontWeight="Bold"
+                           HorizontalAlignment="Center" TextAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+            </Canvas>
+
+            <StackPanel x:Name="TrackingInstructionPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,140,0,0">
+                <TextBlock Text="Click and hold the orange target" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
+                <TextBlock Text="Keep holding and track it by feel - your cursor will be hidden" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="520" Margin="0,8,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <TextBlock x:Name="ProgressText" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0" Visibility="Collapsed"/>
+
+        <Canvas x:Name="TraceTileCanvas" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+
+        <Border x:Name="TileLegend" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="24"
+                Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource SurfaceBorderBrush}" BorderThickness="1"
+                CornerRadius="10" Padding="14">
+            <StackPanel>
+                <TextBlock Text="Trace legend" FontSize="13" FontWeight="Bold" Margin="0,0,0,8"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <Rectangle Width="16" Height="3" Fill="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Your mouse trace" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <Ellipse Width="10" Height="10" Fill="{StaticResource TargetABrush}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <Ellipse Width="10" Height="10" Fill="{StaticResource TargetBBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Hipfire target A / B" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <Ellipse Width="10" Height="10" Fill="{StaticResource AdsTargetABrush}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <Ellipse Width="10" Height="10" Fill="{StaticResource AdsTargetBBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="ADS target A / B" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="10" Height="10" Fill="{StaticResource TrackingBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Tracking target path" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- RESULTS -->
+        <ScrollViewer x:Name="ResultsPanel" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" MaxHeight="900">
+            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource SurfaceBorderBrush}" BorderThickness="1"
+                    CornerRadius="12" Padding="28" MaxWidth="700">
+                <StackPanel>
+                    <TextBlock x:Name="ResultsHeadingText" Text="Calibration Results" FontSize="28" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                    <TextBlock x:Name="RecommendationText" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,0,0,16" TextWrapping="Wrap"/>
+                    <Button x:Name="DetailsToggleButton" Content="&#9662; More details" HorizontalAlignment="Center" Margin="0,0,0,12"
+                            Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextSecondaryBrush}" Click="OnDetailsToggleClicked"/>
+                    <StackPanel x:Name="DetailsPanel" Visibility="Collapsed">
+                        <TextBlock x:Name="StatsText" FontFamily="Consolas" FontSize="14" Margin="0,0,0,16"/>
+                    </StackPanel>
+                    <Button x:Name="RunAgainButton" Content="Run Again" FontSize="16" HorizontalAlignment="Center" Click="OnRunAgainClicked"/>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+
+    </Grid>
+</Window>

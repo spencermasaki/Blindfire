@@ -1,0 +1,123 @@
+namespace AimDecider.Trials;
+
+// Target A spawns in a randomized "start zone" near the edge implied by the
+// trial's direction; the nominal (never-rendered) B point spawns in the
+// opposite zone, so the resulting distance varies trial-to-trial rather than
+// using fixed anchors.
+public sealed class TrialPlacementStrategy
+{
+    // Visual distance between Target A and B is kept small relative to the
+    // chosen gap, so the on-screen pair never strays far past the requested
+    // gap range even with the perpendicular wobble applied.
+    private const double CloseGapPerpendicularJitterRatio = 0.2;
+
+    private readonly Random _random;
+    private readonly double _edgeMargin;
+    private readonly double _startZoneFraction;
+    private readonly double _jitterFraction;
+    private readonly double? _gapMinPixels;
+    private readonly double? _gapMaxPixels;
+
+    public TrialPlacementStrategy(Random random, double edgeMargin = 80.0, double startZoneFraction = 0.35, double jitterFraction = 0.20, double? gapMinPixels = null, double? gapMaxPixels = null)
+    {
+        _random = random;
+        _edgeMargin = edgeMargin;
+        _startZoneFraction = startZoneFraction;
+        _jitterFraction = jitterFraction;
+        _gapMinPixels = gapMinPixels;
+        _gapMaxPixels = gapMaxPixels;
+    }
+
+    public (ScreenPoint TargetA, ScreenPoint NominalB) GeneratePositions(Direction direction, double screenWidth, double screenHeight)
+    {
+        if (_gapMinPixels is double gapMin && _gapMaxPixels is double gapMax)
+        {
+            return GenerateCloseGap(direction, screenWidth, screenHeight, gapMin, gapMax);
+        }
+
+        return direction switch
+        {
+            Direction.LeftToRight => GenerateHorizontal(screenWidth, screenHeight, leftToRight: true),
+            Direction.RightToLeft => GenerateHorizontal(screenWidth, screenHeight, leftToRight: false),
+            Direction.UpToDown => GenerateVertical(screenWidth, screenHeight, topToBottom: true),
+            Direction.DownToUp => GenerateVertical(screenWidth, screenHeight, topToBottom: false),
+            _ => throw new ArgumentOutOfRangeException(nameof(direction)),
+        };
+    }
+
+    // Places Target A anywhere with room to spare in the travel direction,
+    // then puts B a small fixed-range distance away along that axis - used
+    // for the ADS phase, where the on-screen gap should stay within a few
+    // inches rather than spanning most of the screen.
+    private (ScreenPoint, ScreenPoint) GenerateCloseGap(Direction direction, double width, double height, double gapMin, double gapMax)
+    {
+        var gap = RandomInRange(gapMin, gapMax);
+        var jitter = gap * CloseGapPerpendicularJitterRatio;
+        var isHorizontal = direction is Direction.LeftToRight or Direction.RightToLeft;
+
+        if (isHorizontal)
+        {
+            var sign = direction == Direction.LeftToRight ? 1 : -1;
+            var startX = RandomInRange(_edgeMargin + gap, width - _edgeMargin - gap);
+            var startY = RandomInRange(_edgeMargin, height - _edgeMargin);
+            var endX = startX + sign * gap;
+            var endY = Clamp(startY + RandomInRange(-jitter, jitter), _edgeMargin, height - _edgeMargin);
+            return (new ScreenPoint(startX, startY), new ScreenPoint(endX, endY));
+        }
+
+        var verticalSign = direction == Direction.UpToDown ? 1 : -1;
+        var startYVertical = RandomInRange(_edgeMargin + gap, height - _edgeMargin - gap);
+        var startXVertical = RandomInRange(_edgeMargin, width - _edgeMargin);
+        var endYVertical = startYVertical + verticalSign * gap;
+        var endXVertical = Clamp(startXVertical + RandomInRange(-jitter, jitter), _edgeMargin, width - _edgeMargin);
+        return (new ScreenPoint(startXVertical, startYVertical), new ScreenPoint(endXVertical, endYVertical));
+    }
+
+    private (ScreenPoint, ScreenPoint) GenerateHorizontal(double width, double height, bool leftToRight)
+    {
+        var startZoneWidth = width * _startZoneFraction;
+
+        var startX = leftToRight
+            ? RandomInRange(_edgeMargin, startZoneWidth)
+            : RandomInRange(width - startZoneWidth, width - _edgeMargin);
+        var endX = leftToRight
+            ? RandomInRange(width - startZoneWidth, width - _edgeMargin)
+            : RandomInRange(_edgeMargin, startZoneWidth);
+
+        var startY = RandomInRange(_edgeMargin, height - _edgeMargin);
+        var jitter = height * _jitterFraction;
+        var endY = Clamp(startY + RandomInRange(-jitter, jitter), _edgeMargin, height - _edgeMargin);
+
+        return (new ScreenPoint(startX, startY), new ScreenPoint(endX, endY));
+    }
+
+    private (ScreenPoint, ScreenPoint) GenerateVertical(double width, double height, bool topToBottom)
+    {
+        var startZoneHeight = height * _startZoneFraction;
+
+        var startY = topToBottom
+            ? RandomInRange(_edgeMargin, startZoneHeight)
+            : RandomInRange(height - startZoneHeight, height - _edgeMargin);
+        var endY = topToBottom
+            ? RandomInRange(height - startZoneHeight, height - _edgeMargin)
+            : RandomInRange(_edgeMargin, startZoneHeight);
+
+        var startX = RandomInRange(_edgeMargin, width - _edgeMargin);
+        var jitter = width * _jitterFraction;
+        var endX = Clamp(startX + RandomInRange(-jitter, jitter), _edgeMargin, width - _edgeMargin);
+
+        return (new ScreenPoint(startX, startY), new ScreenPoint(endX, endY));
+    }
+
+    private double RandomInRange(double min, double max)
+    {
+        if (max <= min)
+        {
+            return min;
+        }
+
+        return min + _random.NextDouble() * (max - min);
+    }
+
+    private static double Clamp(double value, double min, double max) => Math.Max(min, Math.Min(max, value));
+}
