@@ -334,7 +334,7 @@ public partial class MainWindow : Window
         }
 
         ClickSoundPlayer.PlayClick();
-        EndTrackingHold();
+        RestartCurrentTrackingTrial();
     }
 
     private void StartTrackingHold()
@@ -688,11 +688,11 @@ public partial class MainWindow : Window
         var colorWord = _isAdsPhase ? "magenta" : "blue";
         var baseText = direction switch
         {
-            Direction.LeftToRight => $"Move to the {colorWord} target →",
-            Direction.RightToLeft => $"← Move to the {colorWord} target",
-            Direction.UpToDown => $"Move to the {colorWord} target ↓",
-            Direction.DownToUp => $"↑ Move to the {colorWord} target",
-            _ => $"Move to the {colorWord} target",
+            Direction.LeftToRight => $"Drag to the {colorWord} target →",
+            Direction.RightToLeft => $"← Drag to the {colorWord} target",
+            Direction.UpToDown => $"Drag to the {colorWord} target ↓",
+            Direction.DownToUp => $"↑ Drag to the {colorWord} target",
+            _ => $"Drag to the {colorWord} target",
         };
         PromptText.Text = _isAdsPhase ? $"Hold RMB - {baseText}" : baseText;
         PromptSubText.Text = "This is a feel test, not a sight test - don't try to peek. Your cursor re-centers once you click, so you won't see where it actually landed.";
@@ -751,9 +751,25 @@ public partial class MainWindow : Window
             FadeIn(TrackingPanel);
         }
 
+        ProgressText.Text = $"Tracking Trial {_slotIndex + 1} / {TotalTrialCount}";
+        BeginTrackingAttempt();
+    }
+
+    // Releasing early (e.g. an accidental double-click) routes here instead
+    // of EndTrackingHold - the slot index doesn't advance and no result is
+    // recorded, so the player just retries the same segment.
+    private void RestartCurrentTrackingTrial()
+    {
+        StopTrackingRenderLoop();
+        _trackingActive = false;
+        Cursor = Cursors.Arrow;
+        BeginTrackingAttempt();
+    }
+
+    private void BeginTrackingAttempt()
+    {
         TrackingInstructionPanel.Visibility = Visibility.Visible;
         TrackingCountdownText.Text = string.Empty;
-        ProgressText.Text = $"Tracking Trial {_slotIndex + 1} / {TotalTrialCount}";
 
         var startPosition = new ScreenPoint(Width / 2, Height / 2);
         _trackingMotion = new TrackingMotionController(new Random(), Width, Height, startPosition);

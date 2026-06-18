@@ -19,7 +19,7 @@
             <TextBlock Text="Aim Sensitivity Trainer" FontSize="34" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,20"/>
             <TextBlock TextWrapping="Wrap" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,0,0,24">
                 One continuous suite of 30 mixed trials: hipfire flicks, ADS flicks (hold right mouse), and short tracking holds, all shuffled together.
-                For flick trials, click the red target, then move the mouse - without seeing your cursor - to match the gap to the second target, then click again.
+                For flick trials, click the red target, then drag the mouse - without seeing your cursor - to match the gap to the second target, then click again.
                 For tracking trials, click and hold the moving target and follow it by feel. Press ESC any time to abort.
             </TextBlock>
 
