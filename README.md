@@ -19,7 +19,11 @@ no cap this thing is windows only (it's a WPF app) and you need a mouse lol
 
 that's literally it, no other dependencies, it's all built into .NET
 
-## how to actually run it
+## just want the exe, don't care about the code
+
+cool, grab it from the [releases page](https://github.com/spencermasaki/Blindfire/releases/latest) — download `AimDecider.exe` and run it, no .NET install needed. windows might throw a "we don't recognize this app" smartscreen warning since it's unsigned, just click "more info" then "run anyway"
+
+## how to actually run it (from source)
 
 clone the repo:
 
