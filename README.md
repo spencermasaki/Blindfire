@@ -72,4 +72,4 @@ there's 33 tests and they should all pass, they're all just testing the math stu
 - `src/AimDecider/Input/` + `Native/` — the raw mouse input plumbing (this is how it reads your ACTUAL mouse movement instead of the cursor, which matters bc cursor position gets clamped at screen edges and messed with by windows pointer acceleration)
 - `tests/AimDecider.Tests/` — unit tests for all the math-y stuff
 
-anyway have fun, go find your perfect sensitivity 🖱️
+anyway have fun, go find your perfect sensitivity 🖱️ ur mom.
