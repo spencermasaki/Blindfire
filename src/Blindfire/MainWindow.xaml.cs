@@ -50,6 +50,10 @@ public partial class MainWindow : Window
     private static readonly Color TargetBGlowColor = Color.FromRgb(0x3D, 0xA9, 0xFC);
     private static readonly Color AdsTargetAGlowColor = Color.FromRgb(0xB1, 0x4E, 0xFF);
     private static readonly Color AdsTargetBGlowColor = Color.FromRgb(0xFF, 0x4F, 0xD8);
+    private static readonly Brush TrackingTargetBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xB0, 0x20));
+    private static readonly Color TrackingGlowColor = Color.FromRgb(0xFF, 0xB0, 0x20);
+    private static readonly Brush StrafeTargetBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0xCC, 0x71));
+    private static readonly Color StrafeGlowColor = Color.FromRgb(0x2E, 0xCC, 0x71);
 
     private readonly MouseDeltaAccumulator _accumulator = new();
     private readonly RawMouseInputService _rawInputService;
@@ -61,6 +65,7 @@ public partial class MainWindow : Window
     private IReadOnlyList<TrialKind> _kindPattern = Array.Empty<TrialKind>();
     private int _slotIndex;
     private List<TrackingResult> _trackingResults = new();
+    private List<TrackingResult> _strafeResults = new();
     private readonly List<ITrialTile> _tileData = new();
     private readonly List<Border> _tileElements = new();
     private double _horizontalFovDegrees = 70.0;
@@ -70,7 +75,9 @@ public partial class MainWindow : Window
 
     private bool _awaitingTrackingPress;
     private bool _trackingActive;
-    private TrackingMotionController? _trackingMotion;
+    private TrialKind _activeHoldKind;
+    private ITargetMotionController? _trackingMotion;
+    private StrafeMotionController? _activeStrafeController;
     private Stopwatch? _trackingStopwatch;
     private double _trackingElapsedSeconds;
     private double _trackingLastRenderElapsed;
@@ -80,6 +87,9 @@ public partial class MainWindow : Window
     private double _trackingVerticalFovDegrees;
     private ScreenPoint _trackingPreviousPosition;
     private readonly List<ScreenPoint> _trackingTargetTrace = new();
+    private readonly List<double> _strafeTickTimes = new();
+    private readonly List<double> _strafeUserCumulativeDx = new();
+    private readonly List<int> _strafeDirectionSamples = new();
 
     public MainWindow()
     {
@@ -146,7 +156,7 @@ public partial class MainWindow : Window
         _adsRightMouseDown = false;
 
         _kindPattern = TrialKindPattern.Generate(TotalTrialCount);
-        var (hipfireCount, adsCount, _) = TrialKindPattern.CountKinds(TotalTrialCount);
+        var (hipfireCount, adsCount, _, _) = TrialKindPattern.CountKinds(TotalTrialCount);
 
         _hipfireController = TrialSessionController.CreateWithTotalCount(
             hipfireCount, Width, Height, new Random(), new TrialPlacementStrategy(new Random()));
@@ -154,6 +164,7 @@ public partial class MainWindow : Window
             new Random(), gapMinPixels: 4.0 * ScreenPixelsPerInch, gapMaxPixels: 6.0 * ScreenPixelsPerInch);
         _adsController = TrialSessionController.CreateWithTotalCount(adsCount, Width, Height, new Random(), adsPlacement);
         _trackingResults = new List<TrackingResult>();
+        _strafeResults = new List<TrackingResult>();
         _tileData.Clear();
         _tileElements.Clear();
         _slotIndex = 0;
@@ -190,6 +201,7 @@ public partial class MainWindow : Window
         _kindPattern = Array.Empty<TrialKind>();
         _slotIndex = 0;
         _trackingResults = new List<TrackingResult>();
+        _strafeResults = new List<TrackingResult>();
         _tileData.Clear();
         _tileElements.Clear();
         _isAdsPhase = false;
@@ -233,6 +245,7 @@ public partial class MainWindow : Window
         StopTrackingRenderLoop();
         _trackingActive = false;
         _awaitingTrackingPress = false;
+        _activeStrafeController = null;
 
         TrialPanel.Visibility = Visibility.Collapsed;
         TrackingPanel.Visibility = Visibility.Collapsed;
@@ -353,6 +366,9 @@ public partial class MainWindow : Window
         _trackingPreviousPosition = _trackingMotion!.Position;
         _trackingTargetTrace.Clear();
         _trackingTargetTrace.Add(_trackingPreviousPosition);
+        _strafeTickTimes.Clear();
+        _strafeUserCumulativeDx.Clear();
+        _strafeDirectionSamples.Clear();
 
         _trackingStopwatch = Stopwatch.StartNew();
         CompositionTarget.Rendering += OnTrackingRenderTick;
@@ -393,6 +409,13 @@ public partial class MainWindow : Window
         _trackingPreviousPosition = newPosition;
         _trackingTargetTrace.Add(newPosition);
 
+        if (_activeStrafeController != null)
+        {
+            _strafeTickTimes.Add(_trackingElapsedSeconds);
+            _strafeUserCumulativeDx.Add(_accumulator.AccumulatedDx);
+            _strafeDirectionSamples.Add(_activeStrafeController.CurrentDirection);
+        }
+
         PositionTrackingTarget(newPosition);
 
         var remaining = Math.Max(0, TrackingTrialDurationSeconds - _trackingElapsedSeconds);
@@ -409,6 +432,27 @@ public partial class MainWindow : Window
         StopTrackingRenderLoop();
         _trackingActive = false;
         Cursor = Cursors.Arrow;
+
+        if (_activeHoldKind == TrialKind.Strafe)
+        {
+            var reversals = StrafeCompensationAnalyzer.Analyze(_strafeTickTimes, _strafeUserCumulativeDx, _strafeDirectionSamples);
+            var strafeResult = new TrackingResult(
+                _accumulator.AccumulatedDx,
+                _accumulator.AccumulatedDy,
+                _trackingAccumulatedDegreesX,
+                _trackingAccumulatedDegreesY,
+                _trackingElapsedSeconds,
+                _accumulator.SampleCount,
+                _accumulator.TracePoints.ToArray(),
+                _trackingTargetTrace.ToArray(),
+                reversals.Select(r => r.LagSeconds).ToArray(),
+                reversals.Select(r => r.OvershootCounts).ToArray());
+
+            _strafeResults.Add(strafeResult);
+            _tileData.Add(new StrafeTile(strafeResult));
+            AdvanceToNextSlot();
+            return;
+        }
 
         var result = new TrackingResult(
             _accumulator.AccumulatedDx,
@@ -510,6 +554,9 @@ public partial class MainWindow : Window
         sb.AppendLine();
         sb.AppendLine("=== Tracking test ===");
         AppendTrackingSessionStats(sb, trackingSummary, _trackingResults);
+        sb.AppendLine();
+        sb.AppendLine("=== Strafe test (side-to-side, diagnostic only - not used in the recommendation) ===");
+        AppendStrafeSessionStats(sb, _strafeResults);
 
         StatsText.Text = sb.ToString();
 
@@ -618,6 +665,42 @@ public partial class MainWindow : Window
         sb.AppendLine($"Vertical (informational only):        median={summary.VerticalStats.Median:F0} counts/deg");
     }
 
+    // Reports how the user compensates specifically at direction changes -
+    // none of this feeds the headline recommendation, it's purely a "are you
+    // over/under-correcting on reversals" diagnostic.
+    private static void AppendStrafeSessionStats(StringBuilder sb, IReadOnlyList<TrackingResult> results)
+    {
+        if (results.Count == 0)
+        {
+            sb.AppendLine("No strafe trials completed.");
+            return;
+        }
+
+        var totalDuration = results.Sum(r => r.DurationSeconds);
+        var allLags = results.SelectMany(r => r.ReversalLags).ToList();
+        var allOvershoots = results.SelectMany(r => r.ReversalOvershoots).ToList();
+
+        sb.AppendLine($"{results.Count} strafe trials, {totalDuration:F1}s total held, {allLags.Count} direction changes observed");
+
+        if (allLags.Count == 0)
+        {
+            sb.AppendLine("Not enough direction changes recorded to judge compensation.");
+            return;
+        }
+
+        var avgLagMs = allLags.Average() * 1000.0;
+        var avgOvershootCounts = allOvershoots.Average();
+        var avgCountsPerDegree = results.Where(r => r.CountsPerDegreeHorizontal > 0)
+            .Select(r => r.CountsPerDegreeHorizontal).DefaultIfEmpty(0).Average();
+        var avgOvershootDegrees = avgCountsPerDegree > 0 ? avgOvershootCounts / avgCountsPerDegree : 0;
+
+        sb.AppendLine($"Average reaction lag on direction change: {avgLagMs:F0}ms");
+        sb.AppendLine($"Average overshoot before correcting:      {avgOvershootDegrees:F2} degrees ({avgOvershootCounts:F0} raw counts)");
+        sb.AppendLine(avgLagMs < 200
+            ? "You're catching direction changes quickly with little overshoot."
+            : "You're lagging noticeably behind direction changes - a touch more sensitivity or some focused practice on anticipating reversals could help.");
+    }
+
     private double ComputeImpliedDegrees(TrialDefinition definition)
     {
         if (definition.Direction is Direction.LeftToRight or Direction.RightToLeft)
@@ -700,18 +783,22 @@ public partial class MainWindow : Window
     }
 
     // Dispatches to the kind of trial the mixed-pattern sequence calls for
-    // next - the three trial types are interleaved within one session, not
+    // next - the four trial types are interleaved within one session, not
     // run as separate phases, so each slot just swaps which UI is active.
     private void PresentSlot(int index)
     {
         var kind = _kindPattern[index];
-        if (kind == TrialKind.Tracking)
+        switch (kind)
         {
-            EnterTrackingSlot();
-        }
-        else
-        {
-            EnterFlickSlot(isAds: kind == TrialKind.Ads);
+            case TrialKind.Tracking:
+                EnterTrackingSlot();
+                break;
+            case TrialKind.Strafe:
+                EnterStrafeSlot();
+                break;
+            default:
+                EnterFlickSlot(isAds: kind == TrialKind.Ads);
+                break;
         }
     }
 
@@ -745,6 +832,12 @@ public partial class MainWindow : Window
 
     private void EnterTrackingSlot()
     {
+        _activeHoldKind = TrialKind.Tracking;
+        ApplyHoldVisualStyle(
+            TrackingTargetBrush, TrackingGlowColor,
+            "Click and hold the orange target",
+            "Keep holding and track it by feel - your cursor will be hidden");
+
         TrialPanel.Visibility = Visibility.Collapsed;
         if (TrackingPanel.Visibility != Visibility.Visible)
         {
@@ -753,6 +846,36 @@ public partial class MainWindow : Window
 
         ProgressText.Text = $"Tracking Trial {_slotIndex + 1} / {TotalTrialCount}";
         BeginTrackingAttempt();
+    }
+
+    // Same hold mechanic as plain tracking, just a different motion model
+    // (side-to-side strafing rather than free-roam wander) aimed at a
+    // different diagnostic: how the user compensates when the target
+    // suddenly reverses direction, rather than overall tracking smoothness.
+    private void EnterStrafeSlot()
+    {
+        _activeHoldKind = TrialKind.Strafe;
+        ApplyHoldVisualStyle(
+            StrafeTargetBrush, StrafeGlowColor,
+            "Click and hold the green target",
+            "It strafes side to side and can reverse anytime once it's committed to a direction for a moment - keep holding and follow it by feel");
+
+        TrialPanel.Visibility = Visibility.Collapsed;
+        if (TrackingPanel.Visibility != Visibility.Visible)
+        {
+            FadeIn(TrackingPanel);
+        }
+
+        ProgressText.Text = $"Strafe Trial {_slotIndex + 1} / {TotalTrialCount}";
+        BeginTrackingAttempt();
+    }
+
+    private void ApplyHoldVisualStyle(Brush targetBrush, Color glowColor, string heading, string subtext)
+    {
+        TrackingTargetEllipse.Fill = targetBrush;
+        ((DropShadowEffect)TrackingTargetEllipse.Effect).Color = glowColor;
+        TrackingInstructionHeading.Text = heading;
+        TrackingInstructionSubtext.Text = subtext;
     }
 
     // Releasing early (e.g. an accidental double-click) routes here instead
@@ -772,7 +895,18 @@ public partial class MainWindow : Window
         TrackingCountdownText.Text = string.Empty;
 
         var startPosition = new ScreenPoint(Width / 2, Height / 2);
-        _trackingMotion = new TrackingMotionController(new Random(), Width, Height, startPosition);
+        if (_activeHoldKind == TrialKind.Strafe)
+        {
+            var strafeMotion = new StrafeMotionController(new Random(), Width, Height, startPosition);
+            _activeStrafeController = strafeMotion;
+            _trackingMotion = strafeMotion;
+        }
+        else
+        {
+            _activeStrafeController = null;
+            _trackingMotion = new TrackingMotionController(new Random(), Width, Height, startPosition);
+        }
+
         PositionTrackingTarget(startPosition);
         _awaitingTrackingPress = true;
     }

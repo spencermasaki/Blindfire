@@ -14,3 +14,8 @@ public sealed record TrackingTile(TrackingResult Result) : ITrialTile
 {
     public TrialKind Kind => TrialKind.Tracking;
 }
+
+public sealed record StrafeTile(TrackingResult Result) : ITrialTile
+{
+    public TrialKind Kind => TrialKind.Strafe;
+}

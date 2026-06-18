@@ -123,8 +123,8 @@
             </Canvas>
 
             <StackPanel x:Name="TrackingInstructionPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,140,0,0">
-                <TextBlock Text="Click and hold the orange target" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
-                <TextBlock Text="Keep holding and track it by feel - your cursor will be hidden" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="520" Margin="0,8,0,0"/>
+                <TextBlock x:Name="TrackingInstructionHeading" Text="Click and hold the orange target" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="TrackingInstructionSubtext" Text="Keep holding and track it by feel - your cursor will be hidden" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="520" Margin="0,8,0,0"/>
             </StackPanel>
         </Grid>
 
@@ -151,9 +151,13 @@
                     <Ellipse Width="10" Height="10" Fill="{StaticResource AdsTargetBBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                     <TextBlock Text="ADS target A / B" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <Ellipse Width="10" Height="10" Fill="{StaticResource TrackingBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                     <TextBlock Text="Tracking target path" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="10" Height="10" Fill="{StaticResource StrafeBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Strafe target path" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
             </StackPanel>
         </Border>

@@ -7,7 +7,7 @@ namespace Blindfire.Tracking;
 // target wanders smoothly across most of the screen without ever snapping to
 // a new direction. Near an edge, the re-picked heading is biased back toward
 // the screen center instead of bouncing, keeping the motion organic.
-public sealed class TrackingMotionController
+public sealed class TrackingMotionController : ITargetMotionController
 {
     private const double MinSpeed = 150.0;
     private const double MaxSpeed = 400.0;

@@ -5,4 +5,5 @@ public enum TrialKind
     Hipfire,
     Ads,
     Tracking,
+    Strafe,
 }

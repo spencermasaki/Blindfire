@@ -12,6 +12,7 @@
         <Color x:Key="TrackingColor">#FFFFB020</Color>
         <Color x:Key="AdsTargetAColor">#FFB14EFF</Color>
         <Color x:Key="AdsTargetBColor">#FFFF4FD8</Color>
+        <Color x:Key="StrafeColor">#FF2ECC71</Color>
 
         <!-- Brushes -->
         <LinearGradientBrush x:Key="BackgroundGradientBrush" StartPoint="0,0" EndPoint="1,1">
@@ -28,6 +29,7 @@
         <SolidColorBrush x:Key="TrackingBrush" Color="{StaticResource TrackingColor}"/>
         <SolidColorBrush x:Key="AdsTargetABrush" Color="{StaticResource AdsTargetAColor}"/>
         <SolidColorBrush x:Key="AdsTargetBBrush" Color="{StaticResource AdsTargetBColor}"/>
+        <SolidColorBrush x:Key="StrafeBrush" Color="{StaticResource StrafeColor}"/>
         <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFF1F3F5"/>
         <SolidColorBrush x:Key="TextSecondaryBrush" Color="#FF8A8F98"/>
 

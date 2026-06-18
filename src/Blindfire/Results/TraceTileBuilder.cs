@@ -25,6 +25,7 @@ public static class TraceTileBuilder
     private static readonly Color AdsAColor = Color.FromRgb(0xB1, 0x4E, 0xFF);
     private static readonly Color AdsBColor = Color.FromRgb(0xFF, 0x4F, 0xD8);
     private static readonly Color TrackingTargetColor = Color.FromRgb(0xFF, 0xB0, 0x20);
+    private static readonly Color StrafeTargetColor = Color.FromRgb(0x2E, 0xCC, 0x71);
     private static readonly Color TraceLineColor = Colors.White;
 
     private sealed record TraceLine(IReadOnlyList<Point> Points, Color Color);
@@ -48,7 +49,8 @@ public static class TraceTileBuilder
             var (lines, markers) = tiles[i] switch
             {
                 FlickTile flick => BuildFlickGeometry(flick),
-                TrackingTile tracking => BuildTrackingGeometry(tracking, screenWidth, screenHeight, horizontalFovDegrees, verticalFovDegrees),
+                TrackingTile tracking => BuildHoldGeometry(tracking.Result, TrackingTargetColor, screenWidth, screenHeight, horizontalFovDegrees, verticalFovDegrees),
+                StrafeTile strafe => BuildHoldGeometry(strafe.Result, StrafeTargetColor, screenWidth, screenHeight, horizontalFovDegrees, verticalFovDegrees),
                 _ => (new List<TraceLine>(), new List<Marker>()),
             };
             geometries[i] = new TileGeometry(lines, markers);
@@ -59,7 +61,7 @@ public static class TraceTileBuilder
         var borders = new Border[count];
         for (var i = 0; i < count; i++)
         {
-            var isFlick = tiles[i].Kind != TrialKind.Tracking;
+            var isFlick = tiles[i].Kind is TrialKind.Hipfire or TrialKind.Ads;
             var transform = isFlick ? BuildCenteredTransform(geometries[i], placements[i], flickScale) : null;
             borders[i] = BuildVisual(placements[i], geometries[i].Lines, geometries[i].Markers, transform);
         }
@@ -105,11 +107,9 @@ public static class TraceTileBuilder
     // counts-per-degree, degrees -> pixels via a flat (non-FOV-projected)
     // scale, anchored at the target's starting position. Good for comparing
     // shape/lag, not a calibrated overlay.
-    private static (List<TraceLine>, List<Marker>) BuildTrackingGeometry(
-        TrackingTile tracking, double screenWidth, double screenHeight, double horizontalFovDegrees, double verticalFovDegrees)
+    private static (List<TraceLine>, List<Marker>) BuildHoldGeometry(
+        TrackingResult result, Color targetColor, double screenWidth, double screenHeight, double horizontalFovDegrees, double verticalFovDegrees)
     {
-        var result = tracking.Result;
-
         var targetPoints = Decimate(result.Target, MaxRenderedTracePoints)
             .Select(p => new Point(p.X, p.Y))
             .ToList();
@@ -126,10 +126,10 @@ public static class TraceTileBuilder
 
         var lines = new List<TraceLine>
         {
-            new(targetPoints, TrackingTargetColor),
+            new(targetPoints, targetColor),
             new(mousePoints, TraceLineColor),
         };
-        var markers = new List<Marker> { new(new Point(start.X, start.Y), TrackingTargetColor) };
+        var markers = new List<Marker> { new(new Point(start.X, start.Y), targetColor) };
 
         return (lines, markers);
     }
@@ -145,7 +145,7 @@ public static class TraceTileBuilder
 
         for (var i = 0; i < count; i++)
         {
-            if (tiles[i].Kind == TrialKind.Tracking)
+            if (tiles[i].Kind is not (TrialKind.Hipfire or TrialKind.Ads))
             {
                 continue;
             }
