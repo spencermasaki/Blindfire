@@ -68,11 +68,6 @@ public partial class MainWindow : Window
     private bool _isAdsPhase;
     private bool _adsRightMouseDown;
 
-    private double? _baseSensitivity;
-    private double _speedMultiplier = 1.0;
-    private string _adsMultiplierLine = string.Empty;
-    private string _straightnessLine = string.Empty;
-
     private bool _awaitingTrackingPress;
     private bool _trackingActive;
     private TrackingMotionController? _trackingMotion;
@@ -468,27 +463,37 @@ public partial class MainWindow : Window
         // headline number instead of showing two recommendations to reconcile.
         var sensEstimates = new[] { flickSens, trackingSens }.Where(v => v.HasValue).Select(v => v!.Value).ToList();
 
-        // Stashed so the Speed slider can live-rescale the headline number
-        // without re-running calibration. The ADS multiplier line is just a
-        // ratio of two sensitivities derived from the same base value, so a
-        // uniform speed scale cancels out of it - it's computed once here and
-        // never touched again.
-        _baseSensitivity = sensEstimates.Count == 0 ? null : sensEstimates.Average();
+        var lines = new List<string>();
 
-        _adsMultiplierLine = flickMultiplier == null
-            ? "Could not compute a recommended ADS sensitivity multiplier."
-            : $"Recommended ADS sensitivity multiplier: {flickMultiplier:F2}";
+        if (sensEstimates.Count == 0)
+        {
+            lines.Add("Could not compute a recommended sensitivity from either test.");
+        }
+        else
+        {
+            var combinedSens = sensEstimates.Average();
+            var cm360 = 360.0 * 2.54 / (_mouseDpi!.Value * combinedSens * ApexLegendsProfile.MYaw);
+            lines.Add($"Recommended Apex Legends sensitivity: {combinedSens:F3}");
+            lines.Add($"(~{cm360:F1} cm/360 at {_mouseDpi:F0} DPI)");
+        }
+
+        if (flickMultiplier == null)
+        {
+            lines.Add("Could not compute a recommended ADS sensitivity multiplier.");
+        }
+        else
+        {
+            lines.Add($"Recommended ADS sensitivity multiplier: {flickMultiplier:F2}");
+        }
 
         var straightnessValues = hipfireFlick.StraightnessStats.RawValues.Concat(adsFlick.StraightnessStats.RawValues).ToList();
-        _straightnessLine = straightnessValues.Count > 0
-            ? $"Average mouse path straightness: {straightnessValues.Average():P0} - {DescribeStraightness(straightnessValues.Average())}"
-            : string.Empty;
+        if (straightnessValues.Count > 0)
+        {
+            var avgStraightness = straightnessValues.Average();
+            lines.Add($"Average mouse path straightness: {avgStraightness:P0} - {DescribeStraightness(avgStraightness)}");
+        }
 
-        SpeedAdjustPanel.Visibility = _baseSensitivity == null ? Visibility.Collapsed : Visibility.Visible;
-        _speedMultiplier = 1.0;
-        SpeedSlider.Value = 1.0;
-        SpeedValueText.Text = "1.00x";
-        UpdateRecommendationText();
+        RecommendationText.Text = string.Join("\n", lines);
 
         var sb = new StringBuilder();
         sb.AppendLine($"Horizontal FOV: {_horizontalFovDegrees:F0} degrees");
@@ -511,47 +516,6 @@ public partial class MainWindow : Window
         ResultsPanel.UpdateLayout();
         BuildTraceTileCanvas();
         Focus();
-    }
-
-    private void OnSpeedSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        // The Slider's Minimum/Value coercion can fire this mid-parse, while
-        // InitializeComponent() is still wiring up later-declared elements
-        // like SpeedValueText - bail out until the window is fully built.
-        if (!IsInitialized)
-        {
-            return;
-        }
-
-        _speedMultiplier = e.NewValue;
-        SpeedValueText.Text = $"{_speedMultiplier:F2}x";
-        UpdateRecommendationText();
-    }
-
-    private void UpdateRecommendationText()
-    {
-        var lines = new List<string>();
-
-        if (_baseSensitivity == null)
-        {
-            lines.Add("Could not compute a recommended sensitivity from either test.");
-        }
-        else
-        {
-            var combinedSens = _baseSensitivity.Value * _speedMultiplier;
-            var cm360 = 360.0 * 2.54 / (_mouseDpi!.Value * combinedSens * ApexLegendsProfile.MYaw);
-            lines.Add($"Recommended Apex Legends sensitivity: {combinedSens:F3}");
-            lines.Add($"(~{cm360:F1} cm/360 at {_mouseDpi:F0} DPI)");
-        }
-
-        lines.Add(_adsMultiplierLine);
-
-        if (!string.IsNullOrEmpty(_straightnessLine))
-        {
-            lines.Add(_straightnessLine);
-        }
-
-        RecommendationText.Text = string.Join("\n", lines);
     }
 
     private void OnDetailsToggleClicked(object sender, RoutedEventArgs e)
