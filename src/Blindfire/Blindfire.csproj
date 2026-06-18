@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RootNamespace>Blindfire</RootNamespace>
+    <ApplicationIcon>AppIcon.ico</ApplicationIcon>
+    <Product>Aim Sensitivity Trainer</Product>
+    <AssemblyTitle>Aim Sensitivity Trainer</AssemblyTitle>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <!--
+    Self-contained single-file publish settings (RuntimeIdentifier,
+    SelfContained, PublishSingleFile, etc.) are intentionally NOT set here.
+    They're passed as explicit -r/-p: flags on the dotnet publish command line
+    in publish.ps1 instead, so plain dotnet build/run/test stay framework-
+    dependent and unaffected by publish-only concerns.
+  -->
+
+</Project>

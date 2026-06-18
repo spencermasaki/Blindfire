@@ -21,7 +21,7 @@ that's literally it, no other dependencies, it's all built into .NET
 
 ## just want the exe, don't care about the code
 
-cool, grab it from the [releases page](https://github.com/spencermasaki/Blindfire/releases/latest) — download `AimDecider.exe` and run it, no .NET install needed. windows might throw a "we don't recognize this app" smartscreen warning since it's unsigned, just click "more info" then "run anyway"
+cool, grab it from the [releases page](https://github.com/spencermasaki/Blindfire/releases/latest) — download `Blindfire.exe` and run it, no .NET install needed. windows might throw a "we don't recognize this app" smartscreen warning since it's unsigned, just click "more info" then "run anyway"
 
 ## how to actually run it (from source)
 
@@ -35,7 +35,7 @@ cd Blindfire
 then just run it straight from source, no build step needed:
 
 ```powershell
-dotnet run --project src/AimDecider/AimDecider.csproj
+dotnet run --project src/Blindfire/Blindfire.csproj
 ```
 
 a window should pop up. if it doesn't, something's wrong and you should yell at me (or check that `dotnet --version` actually works)
@@ -43,10 +43,10 @@ a window should pop up. if it doesn't, something's wrong and you should yell at 
 ## how to build it (if you just want the exe)
 
 ```powershell
-dotnet build src/AimDecider/AimDecider.csproj
+dotnet build src/Blindfire/Blindfire.csproj
 ```
 
-the exe ends up somewhere like `src/AimDecider/bin/Debug/net8.0-windows/AimDecider.exe`
+the exe ends up somewhere like `src/Blindfire/bin/Debug/net8.0-windows/Blindfire.exe`
 
 ## how to make a standalone exe to send to your friends
 
@@ -56,24 +56,24 @@ there's a script that already does this for you, it bundles the whole .NET runti
 ./publish.ps1
 ```
 
-gives you a single ~70MB exe at `src/AimDecider/bin/Release/net8.0-windows/win-x64/publish/AimDecider.exe` that just works on any 64-bit windows machine, no .NET install required. heads up tho, windows might show a "we don't recognize this app" smartscreen warning since it's not signed — that's normal, just click "more info" then "run anyway"
+gives you a single ~70MB exe at `src/Blindfire/bin/Release/net8.0-windows/win-x64/publish/Blindfire.exe` that just works on any 64-bit windows machine, no .NET install required. heads up tho, windows might show a "we don't recognize this app" smartscreen warning since it's not signed — that's normal, just click "more info" then "run anyway"
 
 ## running the tests (if ur into that)
 
 ```powershell
-dotnet test tests/AimDecider.Tests/AimDecider.Tests.csproj
+dotnet test tests/Blindfire.Tests/Blindfire.Tests.csproj
 ```
 
 there's 33 tests and they should all pass, they're all just testing the math stuff (sensitivity calculations, target placement, etc) not the actual UI
 
 ## quick project tour (in case you wanna poke around the code)
 
-- `src/AimDecider/MainWindow.xaml(.cs)` — the actual app, all the UI logic lives here
-- `src/AimDecider/Trials/` — the click-target trial logic (hipfire + ADS)
-- `src/AimDecider/Tracking/` — the moving-target tracking trial logic
-- `src/AimDecider/Calibration/` — the actual sensitivity math
-- `src/AimDecider/Results/` — the trace tile visualization stuff on the results screen
-- `src/AimDecider/Input/` + `Native/` — the raw mouse input plumbing (this is how it reads your ACTUAL mouse movement instead of the cursor, which matters bc cursor position gets clamped at screen edges and messed with by windows pointer acceleration)
-- `tests/AimDecider.Tests/` — unit tests for all the math-y stuff
+- `src/Blindfire/MainWindow.xaml(.cs)` — the actual app, all the UI logic lives here
+- `src/Blindfire/Trials/` — the click-target trial logic (hipfire + ADS)
+- `src/Blindfire/Tracking/` — the moving-target tracking trial logic
+- `src/Blindfire/Calibration/` — the actual sensitivity math
+- `src/Blindfire/Results/` — the trace tile visualization stuff on the results screen
+- `src/Blindfire/Input/` + `Native/` — the raw mouse input plumbing (this is how it reads your ACTUAL mouse movement instead of the cursor, which matters bc cursor position gets clamped at screen edges and messed with by windows pointer acceleration)
+- `tests/Blindfire.Tests/` — unit tests for all the math-y stuff
 
 anyway have fun, go find your perfect sensitivity 🖱️ ur mom.

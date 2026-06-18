@@ -1,6 +1,6 @@
 Add-Type -AssemblyName System.Drawing
 
-Add-Type -Name NativeIcon -Namespace AimDeciderTools -MemberDefinition @"
+Add-Type -Name NativeIcon -Namespace BlindfireTools -MemberDefinition @"
 [System.Runtime.InteropServices.DllImport("user32.dll")]
 public static extern bool DestroyIcon(System.IntPtr hIcon);
 "@
@@ -57,7 +57,7 @@ function Get-SingleResolutionIcoBytes {
         return $ms.ToArray()
     }
     finally {
-        [AimDeciderTools.NativeIcon]::DestroyIcon($hIcon) | Out-Null
+        [BlindfireTools.NativeIcon]::DestroyIcon($hIcon) | Out-Null
     }
 }
 
@@ -106,7 +106,7 @@ $previewBmp.Save($previewMs, [System.Drawing.Imaging.ImageFormat]::Png)
 $previewBmp.Dispose()
 
 # Assemble the combined multi-resolution ICO
-$icoPath = "$PSScriptRoot\..\src\AimDecider\AppIcon.ico"
+$icoPath = "$PSScriptRoot\..\src\Blindfire\AppIcon.ico"
 $ms = New-Object System.IO.MemoryStream
 $writer = New-Object System.IO.BinaryWriter $ms
 
