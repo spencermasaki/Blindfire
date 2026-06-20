@@ -32,7 +32,13 @@ public static class TraceTileBuilder
 
     private sealed record Marker(Point Position, Color Color);
 
-    private sealed record TileGeometry(List<TraceLine> Lines, List<Marker> Markers);
+    // MissDistancePixels is the on-screen distance, in the same pixel space
+    // the trace itself is drawn in, between where the trace actually ends and
+    // where it should have ended (Target B for a flick, the target's final
+    // position for a hold) - shown as a label so a glance at any tile
+    // explains whether that trial's contribution to the session's
+    // CountsPerDegree median was a clean data point or a noisy one.
+    private sealed record TileGeometry(List<TraceLine> Lines, List<Marker> Markers, double MissDistancePixels);
 
     // Builds every tile in one pass so flick tiles (hipfire/ADS) can share a
     // single pixel scale - independently fitting each tile to its own box
@@ -46,14 +52,14 @@ public static class TraceTileBuilder
         var geometries = new TileGeometry[count];
         for (var i = 0; i < count; i++)
         {
-            var (lines, markers) = tiles[i] switch
+            var (lines, markers, missDistance) = tiles[i] switch
             {
                 FlickTile flick => BuildFlickGeometry(flick),
                 TrackingTile tracking => BuildHoldGeometry(tracking.Result, TrackingTargetColor, screenWidth, screenHeight, horizontalFovDegrees, verticalFovDegrees),
                 StrafeTile strafe => BuildHoldGeometry(strafe.Result, StrafeTargetColor, screenWidth, screenHeight, horizontalFovDegrees, verticalFovDegrees),
-                _ => (new List<TraceLine>(), new List<Marker>()),
+                _ => (new List<TraceLine>(), new List<Marker>(), 0.0),
             };
-            geometries[i] = new TileGeometry(lines, markers);
+            geometries[i] = new TileGeometry(lines, markers, missDistance);
         }
 
         var flickScale = ComputeSharedFlickScale(tiles, geometries, placements, count);
@@ -63,7 +69,7 @@ public static class TraceTileBuilder
         {
             var isFlick = tiles[i].Kind is TrialKind.Hipfire or TrialKind.Ads;
             var transform = isFlick ? BuildCenteredTransform(geometries[i], placements[i], flickScale) : null;
-            borders[i] = BuildVisual(placements[i], geometries[i].Lines, geometries[i].Markers, transform);
+            borders[i] = BuildVisual(placements[i], geometries[i].Lines, geometries[i].Markers, transform, geometries[i].MissDistancePixels);
         }
 
         return borders;
@@ -73,7 +79,7 @@ public static class TraceTileBuilder
     // axis lands exactly on Target B (we know the real on-screen gap, so no
     // FOV math is needed) - any perpendicular offset at the trace's end is
     // the same thing TrialResult.PerpendicularDrift already measures.
-    private static (List<TraceLine>, List<Marker>) BuildFlickGeometry(FlickTile flick)
+    private static (List<TraceLine>, List<Marker>, double) BuildFlickGeometry(FlickTile flick)
     {
         var definition = flick.Definition;
         var result = flick.Result;
@@ -91,6 +97,10 @@ public static class TraceTileBuilder
 
         var (aColor, bColor) = flick.Kind == TrialKind.Ads ? (AdsAColor, AdsBColor) : (HipfireAColor, HipfireBColor);
 
+        var targetB = new Point(definition.TargetBPosition.X, definition.TargetBPosition.Y);
+        var finalPoint = tracePoints.Count > 0 ? tracePoints[^1] : new Point(definition.TargetAPosition.X, definition.TargetAPosition.Y);
+        var missDistance = Distance(finalPoint, targetB);
+
         var lines = new List<TraceLine> { new(tracePoints, TraceLineColor) };
         var markers = new List<Marker>
         {
@@ -98,7 +108,7 @@ public static class TraceTileBuilder
             new(new Point(definition.TargetBPosition.X, definition.TargetBPosition.Y), bColor),
         };
 
-        return (lines, markers);
+        return (lines, markers, missDistance);
     }
 
     // The target's path is already absolute screen pixels - used as-is. The
@@ -107,7 +117,7 @@ public static class TraceTileBuilder
     // counts-per-degree, degrees -> pixels via a flat (non-FOV-projected)
     // scale, anchored at the target's starting position. Good for comparing
     // shape/lag, not a calibrated overlay.
-    private static (List<TraceLine>, List<Marker>) BuildHoldGeometry(
+    private static (List<TraceLine>, List<Marker>, double) BuildHoldGeometry(
         TrackingResult result, Color targetColor, double screenWidth, double screenHeight, double horizontalFovDegrees, double verticalFovDegrees)
     {
         var targetPoints = Decimate(result.Target, MaxRenderedTracePoints)
@@ -131,7 +141,23 @@ public static class TraceTileBuilder
         };
         var markers = new List<Marker> { new(new Point(start.X, start.Y), targetColor) };
 
-        return (lines, markers);
+        // Both traces are sampled on different, unsynchronized clocks
+        // (target ticks vs. raw input events), so only their endpoints are
+        // anchored to the same instant (the moment the hold ended) - an
+        // index-paired average across the whole decimated trace would
+        // compare positions from different times and not mean anything.
+        var finalTarget = targetPoints.Count > 0 ? targetPoints[^1] : new Point(start.X, start.Y);
+        var finalMouse = mousePoints.Count > 0 ? mousePoints[^1] : new Point(start.X, start.Y);
+        var missDistance = Distance(finalTarget, finalMouse);
+
+        return (lines, markers, missDistance);
+    }
+
+    private static double Distance(Point a, Point b)
+    {
+        var dx = a.X - b.X;
+        var dy = a.Y - b.Y;
+        return Math.Sqrt((dx * dx) + (dy * dy));
     }
 
     // One scale for every flick tile: the largest real A-to-B extent among
@@ -203,7 +229,7 @@ public static class TraceTileBuilder
         return (minX, minY, maxX - minX, maxY - minY);
     }
 
-    private static Border BuildVisual(Rect placement, List<TraceLine> lines, List<Marker> markers, Func<Point, Point>? explicitTransform)
+    private static Border BuildVisual(Rect placement, List<TraceLine> lines, List<Marker> markers, Func<Point, Point>? explicitTransform, double missDistancePixels)
     {
         var border = new Border
         {
@@ -251,6 +277,23 @@ public static class TraceTileBuilder
                 canvas.Children.Add(ellipse);
             }
         }
+
+        // Lives on the same Canvas as the trace, so it inherits the border's
+        // own dimmed/hover opacity and scale instead of needing separate
+        // hover wiring - dim by default like the rest of the tile, crisp on
+        // hover like the rest of the tile.
+        var distanceLabel = new TextBlock
+        {
+            Text = $"{missDistancePixels:F0}px off",
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
+            Foreground = Brushes.White,
+            Width = placement.Width,
+            TextAlignment = TextAlignment.Center,
+        };
+        Canvas.SetLeft(distanceLabel, 0);
+        Canvas.SetBottom(distanceLabel, 1);
+        canvas.Children.Add(distanceLabel);
 
         WireHoverAnimation(border);
 
