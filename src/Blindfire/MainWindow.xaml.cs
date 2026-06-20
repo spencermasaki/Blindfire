@@ -74,6 +74,7 @@ public partial class MainWindow : Window
     private double? _mouseDpi;
     private bool _isAdsPhase;
     private bool _adsRightMouseDown;
+    private bool _isInitializing = true;
 
     private bool _awaitingTrackingPress;
     private bool _trackingActive;
@@ -120,10 +121,13 @@ public partial class MainWindow : Window
         {
             FovDegreesBox.Text = savedSettings.FovDegrees.ToString("G");
             DpiBox.Text = savedSettings.MouseDpi.ToString("G");
-            RandomClickSoundsCheckBox.IsChecked = savedSettings.RandomClickSoundsEnabled;
+            _horizontalFovDegrees = savedSettings.FovDegrees;
+            _mouseDpi = savedSettings.MouseDpi;
+            ClickVolumeSlider.Value = Math.Clamp(savedSettings.ClickVolume, 0.0, 1.0) * 100;
         }
 
-        ClickSoundPlayer.RandomSoundsEnabled = RandomClickSoundsCheckBox.IsChecked == true;
+        // Random click sounds always start off, regardless of what was last selected.
+        _isInitializing = false;
     }
 
     private bool TryValidateFovAndDpi(out double fov, out double dpi)
@@ -155,9 +159,7 @@ public partial class MainWindow : Window
         StartValidationText.Text = string.Empty;
         _horizontalFovDegrees = fov;
         _mouseDpi = dpi;
-        var randomClickSounds = RandomClickSoundsCheckBox.IsChecked == true;
-        ClickSoundPlayer.RandomSoundsEnabled = randomClickSounds;
-        new UserSettings(fov, dpi, randomClickSounds).Save();
+        new UserSettings(fov, dpi, ClickVolumeSlider.Value / 100.0).Save();
         _trackingVerticalFovDegrees = FieldOfViewProjection.DeriveVerticalFov(_horizontalFovDegrees, Width, Height);
         _isAdsPhase = false;
         _adsRightMouseDown = false;
@@ -224,6 +226,37 @@ public partial class MainWindow : Window
     private void OnExitClicked(object sender, RoutedEventArgs e)
     {
         Application.Current.Shutdown();
+    }
+
+    private void OnMoreOptionsToggleClicked(object sender, RoutedEventArgs e)
+    {
+        var expanding = MoreOptionsPanel.Visibility != Visibility.Visible;
+        MoreOptionsPanel.Visibility = expanding ? Visibility.Visible : Visibility.Collapsed;
+        MoreOptionsToggleButton.Content = expanding ? "▴ Hide options" : "▾ More options";
+    }
+
+    private void OnRandomClickSoundsToggled(object sender, RoutedEventArgs e)
+    {
+        ClickSoundPlayer.RandomSoundsEnabled = RandomClickSoundsCheckBox.IsChecked == true;
+    }
+
+    private void OnClickVolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        var volume = ClickVolumeSlider.Value / 100.0;
+        ClickSoundPlayer.Volume = volume;
+        ClickVolumeValueText.Text = $"{(int)ClickVolumeSlider.Value}%";
+
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        new UserSettings(_horizontalFovDegrees, _mouseDpi ?? 800.0, volume).Save();
+    }
+
+    private void OnSoundPreviewTargetClicked(object sender, MouseButtonEventArgs e)
+    {
+        ClickSoundPlayer.PlayClick();
     }
 
     private static void FadeIn(UIElement element)

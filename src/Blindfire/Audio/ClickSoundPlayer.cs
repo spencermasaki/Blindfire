@@ -22,11 +22,11 @@ public static class ClickSoundPlayer
     private const double EffectPeakAmplitude = 0.85;
     private const double CalmBeepPeakAmplitude = 0.5;
 
-    // All effects are rendered to WAV bytes once at startup; playback just
-    // wraps the cached bytes in a fresh stream/player.
-    private static readonly byte[][] Sounds = BuildAllSounds();
-    private static readonly byte[] CalmBeepBytes =
-        BuildWavFile(ToShortArray(Normalize(CalmBeep(), CalmBeepPeakAmplitude)), SampleRate);
+    // Every effect is rendered and normalized to raw PCM samples once at
+    // startup; playback rescales by the current volume and builds a fresh
+    // WAV byte array each time, so volume changes apply instantly.
+    private static readonly short[][] Sounds = BuildAllSounds();
+    private static readonly short[] CalmBeepSamples = ToShortArray(Normalize(CalmBeep(), CalmBeepPeakAmplitude));
 
     private static readonly Random Rng = new();
     private static readonly object Gate = new();
@@ -37,11 +37,15 @@ public static class ClickSoundPlayer
     // When false, every click plays the same steady beep instead of a random effect.
     public static bool RandomSoundsEnabled { get; set; }
 
+    // 0.0 (silent) to 1.0 (full, normalized peak). Applied on every play, not baked into the cache.
+    public static double Volume { get; set; } = 1.0;
+
     public static void PlayClick()
     {
         try
         {
-            var bytes = RandomSoundsEnabled ? Sounds[NextSoundIndex()] : CalmBeepBytes;
+            var samples = RandomSoundsEnabled ? Sounds[NextSoundIndex()] : CalmBeepSamples;
+            var bytes = BuildWavFile(ApplyVolume(samples, Volume), SampleRate);
             var stream = new MemoryStream(bytes);
             var player = new SoundPlayer(stream);
             player.Play();
@@ -50,6 +54,18 @@ public static class ClickSoundPlayer
         {
             // Audio is best-effort feedback; never let playback issues break the trial flow.
         }
+    }
+
+    private static short[] ApplyVolume(short[] samples, double volume)
+    {
+        var clampedVolume = Math.Clamp(volume, 0.0, 1.0);
+        var result = new short[samples.Length];
+        for (var i = 0; i < samples.Length; i++)
+        {
+            result[i] = (short)(samples[i] * clampedVolume);
+        }
+
+        return result;
     }
 
     // Steady sine beep - no pitch sweep, no noise - used when random click sounds are off.
@@ -95,7 +111,7 @@ public static class ClickSoundPlayer
         return order;
     }
 
-    private static byte[][] BuildAllSounds()
+    private static short[][] BuildAllSounds()
     {
         var generators = new Func<double[]>[]
         {
@@ -131,11 +147,10 @@ public static class ClickSoundPlayer
             Sparkle,
         };
 
-        var result = new byte[generators.Length][];
+        var result = new short[generators.Length][];
         for (var i = 0; i < generators.Length; i++)
         {
-            var normalized = Normalize(generators[i](), EffectPeakAmplitude);
-            result[i] = BuildWavFile(ToShortArray(normalized), SampleRate);
+            result[i] = ToShortArray(Normalize(generators[i](), EffectPeakAmplitude));
         }
 
         return result;

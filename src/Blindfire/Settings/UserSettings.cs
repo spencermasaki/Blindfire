@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Blindfire.Settings;
 
-public sealed record UserSettings(double FovDegrees, double MouseDpi, bool RandomClickSoundsEnabled = false)
+public sealed record UserSettings(double FovDegrees, double MouseDpi, double ClickVolume = 1.0)
 {
     private static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
