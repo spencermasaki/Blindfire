@@ -52,7 +52,6 @@ public partial class MainWindow : Window
     // WPF's coordinate space is device-independent: 96 units = 1 physical
     // inch on screen, regardless of the monitor's actual pixel density.
     private const double ScreenPixelsPerInch = 96.0;
-    private const int TotalTrialCount = 30;
     private const double TargetFps = 60.0;
     private const double TrackingPreviewAheadSeconds = 0.6;
     private const double TrackingPreviewStartOpacity = 0.45;
@@ -95,6 +94,7 @@ public partial class MainWindow : Window
     private readonly List<Border> _tileElements = new();
     private double _horizontalFovDegrees = 70.0;
     private double? _mouseDpi;
+    private int _totalTrialCount = 30;
     private bool _isAdsPhase;
     private bool _adsRightMouseDown;
     private bool _isInitializing = true;
@@ -147,7 +147,10 @@ public partial class MainWindow : Window
             _horizontalFovDegrees = savedSettings.FovDegrees;
             _mouseDpi = savedSettings.MouseDpi;
             ClickVolumeSlider.Value = Math.Clamp(savedSettings.ClickVolume, 0.0, 1.0) * 100;
+            TrialCountSlider.Value = Math.Clamp(savedSettings.TrialCount, 10, 100);
         }
+
+        RefreshTrialCountDisplay();
 
         // Random click sounds always start off, regardless of what was last selected.
         _isInitializing = false;
@@ -182,13 +185,13 @@ public partial class MainWindow : Window
         StartValidationText.Text = string.Empty;
         _horizontalFovDegrees = fov;
         _mouseDpi = dpi;
-        new UserSettings(fov, dpi, ClickVolumeSlider.Value / 100.0).Save();
+        new UserSettings(fov, dpi, ClickVolumeSlider.Value / 100.0, _totalTrialCount).Save();
         _trackingVerticalFovDegrees = FieldOfViewProjection.DeriveVerticalFov(_horizontalFovDegrees, Width, Height);
         _isAdsPhase = false;
         _adsRightMouseDown = false;
 
-        _kindPattern = TrialKindPattern.Generate(TotalTrialCount);
-        var (hipfireCount, adsCount, _, _) = TrialKindPattern.CountKinds(TotalTrialCount);
+        _kindPattern = TrialKindPattern.Generate(_totalTrialCount);
+        var (hipfireCount, adsCount, _, _) = TrialKindPattern.CountKinds(_totalTrialCount);
 
         _hipfireController = TrialSessionController.CreateWithTotalCount(
             hipfireCount, Width, Height, new Random(), new TrialPlacementStrategy(new Random()));
@@ -290,12 +293,44 @@ public partial class MainWindow : Window
             return;
         }
 
-        new UserSettings(_horizontalFovDegrees, _mouseDpi ?? 800.0, volume).Save();
+        new UserSettings(_horizontalFovDegrees, _mouseDpi ?? 800.0, volume, _totalTrialCount).Save();
     }
 
     private void OnSoundPreviewTargetClicked(object sender, MouseButtonEventArgs e)
     {
         ClickSoundPlayer.PlayClick();
+    }
+
+    private void OnTrialCountChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        // TrialCountSlider's Minimum (10) differs from the Slider default (0),
+        // so WPF coerces Value and fires this event while InitializeComponent
+        // is still building the tree - before TrialCountBreakdownText (declared
+        // after the slider in XAML) has been constructed. Bail out on that
+        // spurious early call; RefreshTrialCountDisplay (called once after
+        // construction finishes) handles the real initial population.
+        if (TrialCountBreakdownText == null)
+        {
+            return;
+        }
+
+        RefreshTrialCountDisplay();
+
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        new UserSettings(_horizontalFovDegrees, _mouseDpi ?? 800.0, ClickVolumeSlider.Value / 100.0, _totalTrialCount).Save();
+    }
+
+    private void RefreshTrialCountDisplay()
+    {
+        _totalTrialCount = (int)Math.Round(TrialCountSlider.Value);
+        TrialCountValueText.Text = _totalTrialCount.ToString();
+
+        var (hipfireCount, adsCount, trackingCount, strafeCount) = TrialKindPattern.CountKinds(_totalTrialCount);
+        TrialCountBreakdownText.Text = $"{hipfireCount} hipfire, {adsCount} ADS, {trackingCount} tracking, {strafeCount} strafe";
     }
 
     private static void FadeIn(UIElement element)
@@ -913,7 +948,7 @@ public partial class MainWindow : Window
         PromptPanel.Visibility = Visibility.Visible;
 
         var prefix = _isAdsPhase ? "ADS Trial" : "Trial";
-        ProgressText.Text = $"{prefix} {_slotIndex + 1} / {TotalTrialCount}";
+        ProgressText.Text = $"{prefix} {_slotIndex + 1} / {_totalTrialCount}";
 
         if (_isAdsPhase)
         {
@@ -1008,7 +1043,7 @@ public partial class MainWindow : Window
             FadeIn(TrackingPanel);
         }
 
-        ProgressText.Text = $"Tracking Trial {_slotIndex + 1} / {TotalTrialCount}";
+        ProgressText.Text = $"Tracking Trial {_slotIndex + 1} / {_totalTrialCount}";
         BeginTrackingAttempt();
     }
 
@@ -1030,7 +1065,7 @@ public partial class MainWindow : Window
             FadeIn(TrackingPanel);
         }
 
-        ProgressText.Text = $"Strafe Trial {_slotIndex + 1} / {TotalTrialCount}";
+        ProgressText.Text = $"Strafe Trial {_slotIndex + 1} / {_totalTrialCount}";
         BeginTrackingAttempt();
     }
 
