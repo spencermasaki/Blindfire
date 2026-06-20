@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute next version
+        id: version
+        shell: pwsh
+        run: |
+          $tags = git tag --list 'v*' | ForEach-Object { [version]($_ -replace '^v','') }
+          $latest = $tags | Sort-Object | Select-Object -Last 1
+          if (-not $latest) { $latest = [version]'0.0.0' }
+          $next = "{0}.{1}.{2}" -f $latest.Major, $latest.Minor, ($latest.Build + 1)
+          "version=$next" >> $env:GITHUB_OUTPUT
+          "tag=v$next" >> $env:GITHUB_OUTPUT
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Test
+        run: dotnet test --configuration Release
+
+      - name: Publish
+        shell: pwsh
+        run: ./publish.ps1 -Version ${{ steps.version.outputs.version }}
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: src/Blindfire/bin/Release/net8.0-windows/win-x64/publish/Blindfire.exe

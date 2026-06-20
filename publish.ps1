@@ -1,17 +1,29 @@
 # Publishes a self-contained, single-file Blindfire.exe that runs standalone
 # on 64-bit Windows with no .NET install required on the target machine.
+param(
+    # Overrides the csproj <Version> for this build, e.g. when CI computes a release version.
+    [string]$Version
+)
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = $PSScriptRoot
 $project = Join-Path $repoRoot "src\Blindfire\Blindfire.csproj"
 
-& dotnet publish $project `
-    -c Release `
-    -r win-x64 `
-    --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
-    -p:EnableCompressionInSingleFile=true
+$publishArgs = @(
+    $project
+    "-c", "Release"
+    "-r", "win-x64"
+    "--self-contained", "true"
+    "-p:PublishSingleFile=true"
+    "-p:IncludeNativeLibrariesForSelfExtract=true"
+    "-p:EnableCompressionInSingleFile=true"
+)
+if ($Version) {
+    $publishArgs += "-p:Version=$Version"
+}
+
+& dotnet publish @publishArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE"
