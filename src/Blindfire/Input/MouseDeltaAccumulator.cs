@@ -14,6 +14,13 @@ public sealed class MouseDeltaAccumulator
 
     public long AccumulatedDx { get; private set; }
     public long AccumulatedDy { get; private set; }
+
+    // Sum of |dx|/|dy| per sample, independently per axis - unlike
+    // AccumulatedDx/Dy this never cancels out when movement reverses, so it
+    // stays comparable to a path-length-style quantity (e.g. continuous
+    // tracking's per-axis ImpliedDegrees) rather than a net displacement.
+    public long AccumulatedAbsDx { get; private set; }
+    public long AccumulatedAbsDy { get; private set; }
     public double AccumulatedPathLength { get; private set; }
     public int SampleCount { get; private set; }
     public int AbsoluteModePacketsSkipped { get; private set; }
@@ -28,6 +35,8 @@ public sealed class MouseDeltaAccumulator
     {
         AccumulatedDx = 0;
         AccumulatedDy = 0;
+        AccumulatedAbsDx = 0;
+        AccumulatedAbsDy = 0;
         AccumulatedPathLength = 0;
         SampleCount = 0;
         AbsoluteModePacketsSkipped = 0;
@@ -39,6 +48,8 @@ public sealed class MouseDeltaAccumulator
     {
         AccumulatedDx += dx;
         AccumulatedDy += dy;
+        AccumulatedAbsDx += Math.Abs(dx);
+        AccumulatedAbsDy += Math.Abs(dy);
         AccumulatedPathLength += Math.Sqrt((double)dx * dx + (double)dy * dy);
         SampleCount++;
 

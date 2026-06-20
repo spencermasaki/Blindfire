@@ -538,8 +538,8 @@ public partial class MainWindow : Window
         {
             var reversals = StrafeCompensationAnalyzer.Analyze(_strafeTickTimes, _strafeUserCumulativeDx, _strafeDirectionSamples);
             var strafeResult = new TrackingResult(
-                _accumulator.AccumulatedDx,
-                _accumulator.AccumulatedDy,
+                _accumulator.AccumulatedAbsDx,
+                _accumulator.AccumulatedAbsDy,
                 _trackingAccumulatedDegreesX,
                 _trackingAccumulatedDegreesY,
                 _trackingElapsedSeconds,
@@ -556,8 +556,8 @@ public partial class MainWindow : Window
         }
 
         var result = new TrackingResult(
-            _accumulator.AccumulatedDx,
-            _accumulator.AccumulatedDy,
+            _accumulator.AccumulatedAbsDx,
+            _accumulator.AccumulatedAbsDy,
             _trackingAccumulatedDegreesX,
             _trackingAccumulatedDegreesY,
             _trackingElapsedSeconds,
