@@ -19,6 +19,7 @@ public static class ClickSoundPlayer
     // All effects are rendered to WAV bytes once at startup; playback just
     // wraps the cached bytes in a fresh stream/player.
     private static readonly byte[][] Sounds = BuildAllSounds();
+    private static readonly byte[] CalmBeepBytes = BuildWavFile(CalmBeep(), SampleRate);
 
     private static readonly Random Rng = new();
     private static readonly object Gate = new();
@@ -26,11 +27,15 @@ public static class ClickSoundPlayer
     private static int _bagPosition;
     private static int _lastPlayed = -1;
 
+    // When false, every click plays the same steady beep instead of a random effect.
+    public static bool RandomSoundsEnabled { get; set; } = true;
+
     public static void PlayClick()
     {
         try
         {
-            var stream = new MemoryStream(Sounds[NextSoundIndex()]);
+            var bytes = RandomSoundsEnabled ? Sounds[NextSoundIndex()] : CalmBeepBytes;
+            var stream = new MemoryStream(bytes);
             var player = new SoundPlayer(stream);
             player.Play();
         }
@@ -39,6 +44,9 @@ public static class ClickSoundPlayer
             // Audio is best-effort feedback; never let playback issues break the trial flow.
         }
     }
+
+    // Steady, quiet sine beep - no pitch sweep, no noise - used when random click sounds are off.
+    private static short[] CalmBeep() => Render(0.12, _ => 660.0, Sine, t => Bell(t, 0.12), 0.45);
 
     // Shuffle-bag: draw each sound once per shuffle so the user hears variety
     // instead of streaks of the same effect. When the bag empties we reshuffle,

@@ -46,6 +46,8 @@
                         <TextBlock Text="Mouse DPI (for cm/360)" VerticalAlignment="Center"/>
                         <TextBox x:Name="DpiBox" Grid.Column="1" Text="800"/>
                     </Grid>
+
+                    <CheckBox x:Name="RandomClickSoundsCheckBox" Content="Random click sounds (off = calm beep)" IsChecked="True" Margin="0,16,0,0"/>
                 </StackPanel>
             </Border>
 

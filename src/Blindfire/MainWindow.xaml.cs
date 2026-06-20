@@ -120,7 +120,10 @@ public partial class MainWindow : Window
         {
             FovDegreesBox.Text = savedSettings.FovDegrees.ToString("G");
             DpiBox.Text = savedSettings.MouseDpi.ToString("G");
+            RandomClickSoundsCheckBox.IsChecked = savedSettings.RandomClickSoundsEnabled;
         }
+
+        ClickSoundPlayer.RandomSoundsEnabled = RandomClickSoundsCheckBox.IsChecked == true;
     }
 
     private bool TryValidateFovAndDpi(out double fov, out double dpi)
@@ -152,7 +155,9 @@ public partial class MainWindow : Window
         StartValidationText.Text = string.Empty;
         _horizontalFovDegrees = fov;
         _mouseDpi = dpi;
-        new UserSettings(fov, dpi).Save();
+        var randomClickSounds = RandomClickSoundsCheckBox.IsChecked == true;
+        ClickSoundPlayer.RandomSoundsEnabled = randomClickSounds;
+        new UserSettings(fov, dpi, randomClickSounds).Save();
         _trackingVerticalFovDegrees = FieldOfViewProjection.DeriveVerticalFov(_horizontalFovDegrees, Width, Height);
         _isAdsPhase = false;
         _adsRightMouseDown = false;
