@@ -88,6 +88,25 @@
         <!-- TRIAL -->
         <Grid x:Name="TrialPanel" Visibility="Collapsed">
             <Canvas x:Name="TrialCanvas">
+                <Canvas.RenderTransform>
+                    <ScaleTransform x:Name="TrialCanvasZoomTransform" ScaleX="1" ScaleY="1"/>
+                </Canvas.RenderTransform>
+                <Border x:Name="AdsZoomPreviewBorder" CornerRadius="12"
+                        BorderBrush="#CCFFFFFF" BorderThickness="3"
+                        Background="Transparent" IsHitTestVisible="False" Visibility="Collapsed">
+                    <Border.Effect>
+                        <DropShadowEffect Color="White" BlurRadius="25" ShadowDepth="0" Opacity="0.5"/>
+                    </Border.Effect>
+                    <Border.Triggers>
+                        <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                            <BeginStoryboard>
+                                <Storyboard RepeatBehavior="Forever">
+                                    <DoubleAnimation Storyboard.TargetProperty="Effect.Opacity" From="0.3" To="0.75" Duration="0:0:1.2" AutoReverse="True"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Border.Triggers>
+                </Border>
                 <Ellipse x:Name="TargetEllipse" Width="60" Height="60" Fill="{StaticResource TargetABrush}" Stroke="White" StrokeThickness="3" Visibility="Collapsed">
                     <Ellipse.Effect>
                         <DropShadowEffect Color="{StaticResource TargetAColor}" BlurRadius="25" ShadowDepth="0" Opacity="0.85"/>

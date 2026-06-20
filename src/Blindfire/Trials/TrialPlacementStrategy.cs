@@ -17,8 +17,15 @@ public sealed class TrialPlacementStrategy
     private readonly double _jitterFraction;
     private readonly double? _gapMinPixels;
     private readonly double? _gapMaxPixels;
+    private readonly double _originX;
+    private readonly double _originY;
 
-    public TrialPlacementStrategy(Random random, double edgeMargin = 80.0, double startZoneFraction = 0.35, double jitterFraction = 0.20, double? gapMinPixels = null, double? gapMaxPixels = null)
+    // originX/originY shift every generated point by a fixed offset after
+    // placement - used to confine a trial type (e.g. ADS) to a sub-region of
+    // the screen by generating positions as if that sub-region's own
+    // dimensions were the full screen, then translating into real screen
+    // coordinates.
+    public TrialPlacementStrategy(Random random, double edgeMargin = 80.0, double startZoneFraction = 0.35, double jitterFraction = 0.20, double? gapMinPixels = null, double? gapMaxPixels = null, double originX = 0.0, double originY = 0.0)
     {
         _random = random;
         _edgeMargin = edgeMargin;
@@ -26,9 +33,24 @@ public sealed class TrialPlacementStrategy
         _jitterFraction = jitterFraction;
         _gapMinPixels = gapMinPixels;
         _gapMaxPixels = gapMaxPixels;
+        _originX = originX;
+        _originY = originY;
     }
 
     public (ScreenPoint TargetA, ScreenPoint NominalB) GeneratePositions(Direction direction, double screenWidth, double screenHeight)
+    {
+        var (targetA, nominalB) = GenerateLocalPositions(direction, screenWidth, screenHeight);
+        if (_originX == 0.0 && _originY == 0.0)
+        {
+            return (targetA, nominalB);
+        }
+
+        return (
+            new ScreenPoint(targetA.X + _originX, targetA.Y + _originY),
+            new ScreenPoint(nominalB.X + _originX, nominalB.Y + _originY));
+    }
+
+    private (ScreenPoint, ScreenPoint) GenerateLocalPositions(Direction direction, double screenWidth, double screenHeight)
     {
         if (_gapMinPixels is double gapMin && _gapMaxPixels is double gapMax)
         {

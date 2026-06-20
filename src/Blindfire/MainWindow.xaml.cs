@@ -26,6 +26,29 @@ public partial class MainWindow : Window
     private const double TargetHitRadius = 30.0;
     private const double TrackingTrialDurationSeconds = 4.0;
 
+    // Hipfire/Tracking target diameter. ADS targets are rendered at this
+    // size divided by AdsZoomScale, so once the view is actually zoomed in,
+    // they appear at exactly this same on-screen size - ADS looks "smaller"
+    // only because you haven't raised your sights yet.
+    private const double DefaultTargetDiameter = 60.0;
+
+    // Fixed ADS zoom-in amount, always anchored on screen center. ADS
+    // trials are confined to a centered Width/AdsZoomScale x
+    // Height/AdsZoomScale frame (see the ADS TrialPlacementStrategy setup
+    // in OnBeginClicked) so this scale always safely brings both targets
+    // into full view - no per-trial scale calculation needed.
+    private const double AdsZoomScale = 2.0;
+
+    // ADS gap range is intentionally tighter than Hipfire's: it has to fit
+    // within the centered ADS frame (screen size / AdsZoomScale) with room
+    // for edge margins, and a tighter flick also fits the "small, precise
+    // adjustment while looking down sights" feel.
+    private const double AdsGapMinInches = 1.5;
+    private const double AdsGapMaxInches = 2.25;
+    private const double AdsFrameEdgeMargin = 24.0;
+
+    private static readonly TimeSpan AdsZoomDuration = TimeSpan.FromMilliseconds(180);
+
     // WPF's coordinate space is device-independent: 96 units = 1 physical
     // inch on screen, regardless of the monitor's actual pixel density.
     private const double ScreenPixelsPerInch = 96.0;
@@ -169,9 +192,20 @@ public partial class MainWindow : Window
 
         _hipfireController = TrialSessionController.CreateWithTotalCount(
             hipfireCount, Width, Height, new Random(), new TrialPlacementStrategy(new Random()));
+
+        // ADS targets are confined to a centered frame the same size as
+        // what AdsZoomScale will magnify to fill the screen - generate
+        // positions as if that frame's own dimensions were the screen, then
+        // shift them into the frame's actual on-screen position.
+        var adsFrameWidth = Width / AdsZoomScale;
+        var adsFrameHeight = Height / AdsZoomScale;
+        var adsFrameOriginX = (Width - adsFrameWidth) / 2.0;
+        var adsFrameOriginY = (Height - adsFrameHeight) / 2.0;
         var adsPlacement = new TrialPlacementStrategy(
-            new Random(), gapMinPixels: 4.0 * ScreenPixelsPerInch, gapMaxPixels: 6.0 * ScreenPixelsPerInch);
-        _adsController = TrialSessionController.CreateWithTotalCount(adsCount, Width, Height, new Random(), adsPlacement);
+            new Random(), edgeMargin: AdsFrameEdgeMargin,
+            gapMinPixels: AdsGapMinInches * ScreenPixelsPerInch, gapMaxPixels: AdsGapMaxInches * ScreenPixelsPerInch,
+            originX: adsFrameOriginX, originY: adsFrameOriginY);
+        _adsController = TrialSessionController.CreateWithTotalCount(adsCount, adsFrameWidth, adsFrameHeight, new Random(), adsPlacement);
         _trackingResults = new List<TrackingResult>();
         _strafeResults = new List<TrackingResult>();
         _tileData.Clear();
@@ -215,6 +249,11 @@ public partial class MainWindow : Window
         _tileElements.Clear();
         _isAdsPhase = false;
         _adsRightMouseDown = false;
+        HideAdsZoomPreviewBorder();
+        TrialCanvasZoomTransform.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        TrialCanvasZoomTransform.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        TrialCanvasZoomTransform.ScaleX = 1.0;
+        TrialCanvasZoomTransform.ScaleY = 1.0;
         ProgressText.Visibility = Visibility.Collapsed;
         TraceTileCanvas.Children.Clear();
         TraceTileCanvas.Visibility = Visibility.Collapsed;
@@ -301,6 +340,12 @@ public partial class MainWindow : Window
         if (e.ChangedButton == MouseButton.Right)
         {
             _adsRightMouseDown = true;
+
+            if (_isAdsPhase && _runner?.State == TrialState.AwaitingTargetAClick)
+            {
+                BeginAdsZoomIn();
+            }
+
             return;
         }
 
@@ -312,7 +357,7 @@ public partial class MainWindow : Window
         if (_awaitingTrackingPress)
         {
             var clickPosition = e.GetPosition(RootGrid);
-            if (IsWithinTarget(clickPosition, _trackingMotion!.Position))
+            if (IsWithinTarget(clickPosition, _trackingMotion!.Position, TargetHitRadius))
             {
                 ClickSoundPlayer.PlayClick();
                 StartTrackingHold();
@@ -334,8 +379,9 @@ public partial class MainWindow : Window
                     break;
                 }
 
-                var targetAClick = e.GetPosition(RootGrid);
-                if (IsWithinTarget(targetAClick, _runner.Definition.TargetAPosition))
+                var targetAClick = e.GetPosition(TrialCanvas);
+                var targetAHitRadius = _isAdsPhase ? (TargetHitRadius / AdsZoomScale) : TargetHitRadius;
+                if (IsWithinTarget(targetAClick, _runner.Definition.TargetAPosition, targetAHitRadius))
                 {
                     ClickSoundPlayer.PlayClick();
                     _runner.OnTargetAClicked();
@@ -362,7 +408,14 @@ public partial class MainWindow : Window
                 _tileData.Add(new FlickTile(_isAdsPhase ? TrialKind.Ads : TrialKind.Hipfire, _runner.Definition, _runner.Result!));
                 _runner.Complete();
 
-                AdvanceToNextSlot();
+                if (_isAdsPhase)
+                {
+                    BeginAdsZoomOut(AdvanceToNextSlot);
+                }
+                else
+                {
+                    AdvanceToNextSlot();
+                }
 
                 break;
         }
@@ -376,7 +429,13 @@ public partial class MainWindow : Window
 
             if (_isAdsPhase && _runner?.State == TrialState.AwaitingFeelClick)
             {
-                RestartCurrentAdsTrial();
+                BeginAdsZoomOut(RestartCurrentAdsTrial);
+                return;
+            }
+
+            if (_isAdsPhase && _runner?.State == TrialState.AwaitingTargetAClick)
+            {
+                BeginAdsZoomOut(() => { });
             }
 
             return;
@@ -756,6 +815,61 @@ public partial class MainWindow : Window
             definition.TargetAPosition.Y, definition.TargetBPosition.Y, Height, verticalFov);
     }
 
+    // Always zooms in on screen center by AdsZoomScale - safe because ADS
+    // targets are confined (at session start, see OnBeginClicked) to a
+    // centered frame exactly that scale's inverse, so both targets are
+    // always already within the post-zoom visible area.
+    private void BeginAdsZoomIn()
+    {
+        var centerX = Width / 2.0;
+        var centerY = Height / 2.0;
+        TrialCanvasZoomTransform.CenterX = centerX;
+        TrialCanvasZoomTransform.CenterY = centerY;
+        TrialCanvasZoomTransform.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(TrialCanvasZoomTransform.ScaleX, AdsZoomScale, AdsZoomDuration));
+        TrialCanvasZoomTransform.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(TrialCanvasZoomTransform.ScaleY, AdsZoomScale, AdsZoomDuration));
+    }
+
+    // Zooms back out to the full screen, then runs onCompleted - used so a
+    // trial restart or slot advance only happens once the screen has
+    // visually returned to the unzoomed view.
+    private void BeginAdsZoomOut(Action onCompleted)
+    {
+        if (TrialCanvasZoomTransform.ScaleX == 1.0 && TrialCanvasZoomTransform.ScaleY == 1.0)
+        {
+            onCompleted();
+            return;
+        }
+
+        var xAnim = new DoubleAnimation(TrialCanvasZoomTransform.ScaleX, 1.0, AdsZoomDuration);
+        xAnim.Completed += (_, _) => onCompleted();
+        TrialCanvasZoomTransform.BeginAnimation(ScaleTransform.ScaleXProperty, xAnim);
+        TrialCanvasZoomTransform.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(TrialCanvasZoomTransform.ScaleY, 1.0, AdsZoomDuration));
+    }
+
+    // The border is a scaled-down (same aspect ratio) outline of the full
+    // screen, centered on screen center - the same anchor BeginAdsZoomIn
+    // uses - so it visibly expands to fill the screen edges as the canvas
+    // zooms in. Stays visible for the whole ADS trial (zoomed in or out).
+    private void ShowAdsZoomPreviewBorder()
+    {
+        var boxWidth = Width / AdsZoomScale;
+        var boxHeight = Height / AdsZoomScale;
+        AdsZoomPreviewBorder.Width = boxWidth;
+        AdsZoomPreviewBorder.Height = boxHeight;
+
+        Canvas.SetLeft(AdsZoomPreviewBorder, (Width - boxWidth) / 2.0);
+        Canvas.SetTop(AdsZoomPreviewBorder, (Height - boxHeight) / 2.0);
+        AdsZoomPreviewBorder.Visibility = Visibility.Visible;
+    }
+
+    private void HideAdsZoomPreviewBorder()
+    {
+        AdsZoomPreviewBorder.Visibility = Visibility.Collapsed;
+    }
+
     private void StartNextTrial()
     {
         var definition = _controller!.StartNext();
@@ -778,6 +892,12 @@ public partial class MainWindow : Window
 
     private void PresentTrial(TrialDefinition definition)
     {
+        var targetDiameter = _isAdsPhase ? (DefaultTargetDiameter / AdsZoomScale) : DefaultTargetDiameter;
+        TargetEllipse.Width = targetDiameter;
+        TargetEllipse.Height = targetDiameter;
+        TargetBEllipse.Width = targetDiameter;
+        TargetBEllipse.Height = targetDiameter;
+
         TargetEllipse.Fill = _isAdsPhase ? AdsTargetAActiveBrush : TargetAActiveBrush;
         ((DropShadowEffect)TargetEllipse.Effect).Color = _isAdsPhase ? AdsTargetAGlowColor : TargetAGlowColor;
         Canvas.SetLeft(TargetEllipse, definition.TargetAPosition.X - (TargetEllipse.Width / 2));
@@ -794,6 +914,15 @@ public partial class MainWindow : Window
 
         var prefix = _isAdsPhase ? "ADS Trial" : "Trial";
         ProgressText.Text = $"{prefix} {_slotIndex + 1} / {TotalTrialCount}";
+
+        if (_isAdsPhase)
+        {
+            ShowAdsZoomPreviewBorder();
+        }
+        else
+        {
+            HideAdsZoomPreviewBorder();
+        }
     }
 
     private void DimTargetA()
@@ -1018,11 +1147,11 @@ public partial class MainWindow : Window
         sb.AppendLine($"Path straightness:                    median={summary.StraightnessStats.Median:P0}  mean={summary.StraightnessStats.Mean:P0}");
     }
 
-    private static bool IsWithinTarget(Point click, ScreenPoint target)
+    private static bool IsWithinTarget(Point click, ScreenPoint target, double radius)
     {
         var dx = click.X - target.X;
         var dy = click.Y - target.Y;
-        return dx * dx + dy * dy <= TargetHitRadius * TargetHitRadius;
+        return dx * dx + dy * dy <= radius * radius;
     }
 
     // Warps the real OS cursor back to center before it's revealed again, so
