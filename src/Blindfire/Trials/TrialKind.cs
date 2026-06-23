@@ -6,4 +6,6 @@ public enum TrialKind
     Ads,
     Tracking,
     Strafe,
+    QuickFlick,
+    AdsQuickFlick,
 }

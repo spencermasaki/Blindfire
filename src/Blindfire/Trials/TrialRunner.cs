@@ -31,7 +31,7 @@ public sealed class TrialRunner
         State = TrialState.AwaitingFeelClick;
     }
 
-    public void OnFeelClicked(double impliedDegrees)
+    public void OnFeelClicked(double impliedDegrees, double perpendicularImpliedDegrees = 0)
     {
         if (State != TrialState.AwaitingFeelClick)
         {
@@ -40,7 +40,7 @@ public sealed class TrialRunner
 
         Result = new TrialResult(
             Definition.Direction, _accumulator.AccumulatedDx, _accumulator.AccumulatedDy, _accumulator.SampleCount, impliedDegrees,
-            _accumulator.AccumulatedPathLength, _accumulator.TracePoints.ToArray());
+            _accumulator.AccumulatedPathLength, _accumulator.TracePoints.ToArray(), perpendicularImpliedDegrees);
         State = TrialState.ShowingResult;
     }
 

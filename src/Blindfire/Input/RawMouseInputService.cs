@@ -24,8 +24,18 @@ public sealed class RawMouseInputService : IDisposable
 
     public MouseDeltaAccumulator Accumulator => _accumulator;
 
+    // Safe to call more than once, including re-targeting a window it was
+    // previously attached to: removes the old hook before adding a new one,
+    // and re-registers the raw input device against the new hwnd. Win32 raw
+    // input registration for a given usage page/usage is process-wide, so a
+    // second window registering silently redirects all future WM_INPUT
+    // delivery to it - callers that need to hand input back and forth between
+    // two windows (e.g. MainWindow and a secondary fullscreen window) must
+    // call Attach again on the window they want input redirected back to.
     public void Attach(Window window)
     {
+        _hwndSource?.RemoveHook(WndProc);
+
         var helper = new WindowInteropHelper(window);
         var hwnd = helper.EnsureHandle();
 

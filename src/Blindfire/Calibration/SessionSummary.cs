@@ -18,7 +18,13 @@ public static class SessionSummaryBuilder
     // degree of visually-judged A-to-B gap) directly, rather than a flat
     // distance divided by an abstract anchor - every trial is tied to a real,
     // visible, known on-screen distance.
-    public static SessionSummary Build(IReadOnlyList<TrialResult> results, IGameProfile gameProfile)
+    //
+    // includePerpendicularAxis: when true, also pools each trial's
+    // perpendicular-axis movement (e.g. a left-right trial's incidental
+    // up-down offset) into the *other* axis's stats, instead of leaving it
+    // as a drift-only diagnostic - roughly doubles the sample size for both
+    // axes since every trial then contributes to both.
+    public static SessionSummary Build(IReadOnlyList<TrialResult> results, IGameProfile gameProfile, bool includePerpendicularAxis = false)
     {
         var perDirection = new Dictionary<Direction, AxisAggregateStats>();
         foreach (var direction in Enum.GetValues<Direction>())
@@ -33,6 +39,19 @@ public static class SessionSummaryBuilder
         var verticalValues = results
             .Where(r => r.Direction is Direction.UpToDown or Direction.DownToUp)
             .Select(r => r.CountsPerDegree);
+
+        if (includePerpendicularAxis)
+        {
+            var horizontalFromPerpendicular = results
+                .Where(r => (r.Direction is Direction.UpToDown or Direction.DownToUp) && r.PerpendicularImpliedDegrees > 0)
+                .Select(r => r.PerpendicularCountsPerDegree);
+            var verticalFromPerpendicular = results
+                .Where(r => (r.Direction is Direction.LeftToRight or Direction.RightToLeft) && r.PerpendicularImpliedDegrees > 0)
+                .Select(r => r.PerpendicularCountsPerDegree);
+
+            horizontalValues = horizontalValues.Concat(horizontalFromPerpendicular);
+            verticalValues = verticalValues.Concat(verticalFromPerpendicular);
+        }
 
         var horizontalStats = SensitivityCalculator.Aggregate(horizontalValues);
         var verticalStats = SensitivityCalculator.Aggregate(verticalValues);

@@ -18,7 +18,7 @@
         <StackPanel x:Name="StartPanel" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="540">
             <TextBlock Text="Aim Sensitivity Trainer" FontSize="34" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,20"/>
             <TextBlock TextWrapping="Wrap" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,0,0,24">
-                One continuous suite of 30 mixed trials: hipfire flicks, ADS flicks (hold right mouse), and short tracking holds, all shuffled together.
+                One continuous suite of mixed trials: hipfire flicks, ADS flicks (hold right mouse), quick flicks (the same blind feel test, but each target after the first must be hit within a one-second deadline - a shrinking highlight just marks time, the full faint circle stays clickable the whole second), and short tracking holds, all mixed together.
                 For flick trials, click the red target, then drag the mouse - without seeing your cursor - to match the gap to the second target, then click again.
                 For tracking trials, click and hold the moving target and follow it by feel. Press ESC any time to abort.
             </TextBlock>
@@ -85,6 +85,11 @@
                     </Grid>
                     <Slider x:Name="TrialCountSlider" Minimum="10" Maximum="100" Value="30" IsSnapToTickEnabled="True" TickFrequency="1" Margin="0,0,0,8" ValueChanged="OnTrialCountChanged"/>
                     <TextBlock x:Name="TrialCountBreakdownText" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+
+                    <CheckBox x:Name="IncludePerpendicularAxisCheckBox" Content="Include perpendicular-axis data points (experimental)" IsChecked="False" Margin="0,20,0,4" Click="OnIncludePerpendicularAxisToggled"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}">
+                        Every flick trial has incidental off-axis movement too (e.g. a left-right trial still has some small up-down drift). When on, that off-axis movement also counts as a data point for the other axis's stats, instead of being used only as a drift diagnostic.
+                    </TextBlock>
                 </StackPanel>
             </Border>
 
@@ -92,8 +97,52 @@
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                 <Button x:Name="BeginButton" Content="Begin Calibration" FontSize="18" Style="{StaticResource AccentButtonStyle}" Margin="0,0,12,0" Click="OnBeginClicked"/>
+                <Button x:Name="OpenSimulatorButton" Content="Sensitivity Simulator" FontSize="18" Margin="0,0,12,0" Click="OnOpenSimulatorClicked"/>
                 <Button x:Name="ExitButton" Content="Exit" FontSize="18" Click="OnExitClicked"/>
             </StackPanel>
+
+            <Border x:Name="ResultHistoryPanel" Visibility="Collapsed" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource SurfaceBorderBrush}" BorderThickness="1"
+                    CornerRadius="12" Padding="16" Margin="0,24,0,0">
+                <StackPanel>
+                    <TextBlock Text="Recent Results" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                    <Grid x:Name="HistoryRow0" Visibility="Collapsed" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="64"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="HistorySummary0" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="HistorySettings0" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="View" Tag="0" Click="OnViewHistoryEntryClicked" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <Grid x:Name="HistoryRow1" Visibility="Collapsed" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="64"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="HistorySummary1" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="HistorySettings1" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="View" Tag="1" Click="OnViewHistoryEntryClicked" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <Grid x:Name="HistoryRow2" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="64"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="HistorySummary2" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="HistorySettings2" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="View" Tag="2" Click="OnViewHistoryEntryClicked" VerticalAlignment="Center"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
         </StackPanel>
 
         <!-- TRIAL -->
@@ -132,7 +181,11 @@
                         </EventTrigger>
                     </Ellipse.Triggers>
                 </Ellipse>
-                <Ellipse x:Name="TargetBEllipse" Width="60" Height="60" Fill="{StaticResource TargetBBrush}" Stroke="White" StrokeThickness="3" Visibility="Collapsed">
+                <Ellipse x:Name="TargetBEllipse" Width="60" Height="60" Fill="{StaticResource TargetBBrush}" Stroke="White" StrokeThickness="3" Visibility="Collapsed"
+                         RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <ScaleTransform x:Name="TargetBEllipseScaleTransform" ScaleX="1" ScaleY="1"/>
+                    </Ellipse.RenderTransform>
                     <Ellipse.Effect>
                         <DropShadowEffect Color="{StaticResource TargetBColor}" BlurRadius="25" ShadowDepth="0" Opacity="0.85"/>
                     </Ellipse.Effect>
@@ -146,6 +199,11 @@
                         </EventTrigger>
                     </Ellipse.Triggers>
                 </Ellipse>
+                <!-- Quick flick only: a static, translucent full-size circle layered on
+                     top of TargetBEllipse so the real (full-size) clickable area stays
+                     visible for the whole deadline, even once the shrinking highlight
+                     underneath has shrunk away to nothing. -->
+                <Ellipse x:Name="TargetBGhostEllipse" Width="60" Height="60" Visibility="Collapsed" IsHitTestVisible="False"/>
             </Canvas>
 
             <StackPanel x:Name="PromptPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
@@ -211,6 +269,14 @@
                     <TextBlock Text="ADS target A / B" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <Ellipse Width="10" Height="10" Fill="{StaticResource QuickFlickBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Quick flick target" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <Ellipse Width="10" Height="10" Fill="{StaticResource AdsQuickFlickBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="ADS quick flick target" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <Ellipse Width="10" Height="10" Fill="{StaticResource TrackingBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                     <TextBlock Text="Tracking target path" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
@@ -233,7 +299,31 @@
                     <StackPanel x:Name="DetailsPanel" Visibility="Collapsed">
                         <TextBlock x:Name="StatsText" FontFamily="Consolas" FontSize="14" Margin="0,0,0,16"/>
                     </StackPanel>
-                    <Button x:Name="RunAgainButton" Content="Run Again" FontSize="16" HorizontalAlignment="Center" Click="OnRunAgainClicked"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button x:Name="RunAgainButton" Content="Run Again" FontSize="16" Margin="0,0,12,0" Click="OnRunAgainClicked"/>
+                        <Button x:Name="TrySimulatorButton" Content="Try It in 3D" FontSize="16" Click="OnTrySimulatorClicked"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+
+        <!-- RESULT HISTORY DETAIL -->
+        <ScrollViewer x:Name="HistoryDetailPanel" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" MaxHeight="900">
+            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource SurfaceBorderBrush}" BorderThickness="1"
+                    CornerRadius="12" Padding="28" MaxWidth="700">
+                <StackPanel>
+                    <TextBlock x:Name="HistoryHeadingText" Text="Past Result" FontSize="28" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                    <TextBlock x:Name="HistorySettingsUsedText" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,0,0,16"/>
+                    <TextBlock x:Name="HistoryRecommendationText" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,0,0,16" TextWrapping="Wrap"/>
+                    <Button x:Name="HistoryDetailsToggleButton" Content="&#9662; More details" HorizontalAlignment="Center" Margin="0,0,0,12"
+                            Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextSecondaryBrush}" Click="OnHistoryDetailsToggleClicked"/>
+                    <StackPanel x:Name="HistoryDetailsPanel" Visibility="Collapsed">
+                        <TextBlock x:Name="HistoryStatsText" FontFamily="Consolas" FontSize="14" Margin="0,0,0,16"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button x:Name="HistoryTrySimulatorButton" Content="Try It in 3D" FontSize="16" Margin="0,0,12,0" Click="OnHistoryTrySimulatorClicked"/>
+                        <Button Content="Back to Menu" FontSize="16" Click="OnHistoryBackClicked"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </ScrollViewer>

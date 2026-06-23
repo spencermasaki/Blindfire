@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
+using System.Windows.Threading;
 using Blindfire.Audio;
 using Blindfire.Calibration;
 using Blindfire.GameProfiles;
@@ -16,6 +17,7 @@ using Blindfire.Input;
 using Blindfire.Native;
 using Blindfire.Results;
 using Blindfire.Settings;
+using Blindfire.Simulation;
 using Blindfire.Tracking;
 using Blindfire.Trials;
 
@@ -49,6 +51,17 @@ public partial class MainWindow : Window
 
     private static readonly TimeSpan AdsZoomDuration = TimeSpan.FromMilliseconds(180);
 
+    // Quick flick's deadline: each target after the first must be clicked
+    // within this window or the whole trial restarts with fresh positions.
+    // Also doubles as the duration of that target's shrink-to-nothing cue.
+    private static readonly TimeSpan QuickFlickTimerDuration = TimeSpan.FromMilliseconds(1000);
+
+    // Bigger than ADS's tight 1.5-2.25in gap since this variant isn't
+    // confined to a zoomed-in sub-frame; smaller than Hipfire's full-screen
+    // sweep since the deadline is a tight window to judge and execute a big flick blind.
+    private const double QuickFlickGapMinInches = 4.0;
+    private const double QuickFlickGapMaxInches = 8.0;
+
     // WPF's coordinate space is device-independent: 96 units = 1 physical
     // inch on screen, regardless of the monitor's actual pixel density.
     private const double ScreenPixelsPerInch = 96.0;
@@ -78,6 +91,14 @@ public partial class MainWindow : Window
     private static readonly Color TrackingGlowColor = Color.FromRgb(0xFF, 0xB0, 0x20);
     private static readonly Brush StrafeTargetBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0xCC, 0x71));
     private static readonly Color StrafeGlowColor = Color.FromRgb(0x2E, 0xCC, 0x71);
+    private static readonly Brush QuickFlickActiveBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xD2, 0x3F));
+    private static readonly Brush QuickFlickDimmedBrush = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xD2, 0x3F));
+    private static readonly Color QuickFlickGlowColor = Color.FromRgb(0xFF, 0xD2, 0x3F);
+    private static readonly Brush AdsQuickFlickActiveBrush = new SolidColorBrush(Color.FromRgb(0x00, 0xE5, 0xFF));
+    private static readonly Brush AdsQuickFlickDimmedBrush = new SolidColorBrush(Color.FromArgb(0x60, 0x00, 0xE5, 0xFF));
+    private static readonly Color AdsQuickFlickGlowColor = Color.FromRgb(0x00, 0xE5, 0xFF);
+    private static readonly Brush QuickFlickGhostBrush = new SolidColorBrush(Color.FromArgb(0x50, 0xFF, 0xD2, 0x3F));
+    private static readonly Brush AdsQuickFlickGhostBrush = new SolidColorBrush(Color.FromArgb(0x50, 0x00, 0xE5, 0xFF));
 
     private readonly MouseDeltaAccumulator _accumulator = new();
     private readonly RawMouseInputService _rawInputService;
@@ -94,10 +115,31 @@ public partial class MainWindow : Window
     private readonly List<Border> _tileElements = new();
     private double _horizontalFovDegrees = 70.0;
     private double? _mouseDpi;
+    private double? _lastCombinedSensitivity;
+    private double? _lastAdsMultiplier;
     private int _totalTrialCount = 30;
+    private bool _includePerpendicularAxisData;
     private bool _isAdsPhase;
     private bool _adsRightMouseDown;
     private bool _isInitializing = true;
+    private IReadOnlyList<ResultHistoryEntry> _resultHistory = Array.Empty<ResultHistoryEntry>();
+    private ResultHistoryEntry? _viewedHistoryEntry;
+
+    private TrialPlacementStrategy? _quickFlickPlacement;
+    private TrialPlacementStrategy? _adsQuickFlickPlacement;
+    private double _adsFrameWidth;
+    private double _adsFrameHeight;
+    private double _adsFrameOriginX;
+    private double _adsFrameOriginY;
+    private List<TrialResult> _quickFlickResults = new();
+    private List<TrialResult> _adsQuickFlickResults = new();
+    private bool _quickFlickActive;
+    private bool _quickFlickIsAds;
+    private int _quickFlickSegment;
+    private TrialDefinition? _quickFlickDefinitionA;
+    private TrialDefinition? _quickFlickDefinitionB;
+    private TrialResult? _quickFlickPendingResultA;
+    private DispatcherTimer? _quickFlickTimer;
 
     private bool _awaitingTrackingPress;
     private bool _trackingActive;
@@ -151,6 +193,7 @@ public partial class MainWindow : Window
         }
 
         RefreshTrialCountDisplay();
+        RefreshResultHistoryDisplay();
 
         // Random click sounds always start off, regardless of what was last selected.
         _isInitializing = false;
@@ -191,7 +234,7 @@ public partial class MainWindow : Window
         _adsRightMouseDown = false;
 
         _kindPattern = TrialKindPattern.Generate(_totalTrialCount);
-        var (hipfireCount, adsCount, _, _) = TrialKindPattern.CountKinds(_totalTrialCount);
+        var (hipfireCount, adsCount, _, _, _, _) = TrialKindPattern.CountKinds(_totalTrialCount);
 
         _hipfireController = TrialSessionController.CreateWithTotalCount(
             hipfireCount, Width, Height, new Random(), new TrialPlacementStrategy(new Random()));
@@ -209,6 +252,15 @@ public partial class MainWindow : Window
             gapMinPixels: AdsGapMinInches * ScreenPixelsPerInch, gapMaxPixels: AdsGapMaxInches * ScreenPixelsPerInch,
             originX: adsFrameOriginX, originY: adsFrameOriginY);
         _adsController = TrialSessionController.CreateWithTotalCount(adsCount, adsFrameWidth, adsFrameHeight, new Random(), adsPlacement);
+        _adsFrameWidth = adsFrameWidth;
+        _adsFrameHeight = adsFrameHeight;
+        _adsFrameOriginX = adsFrameOriginX;
+        _adsFrameOriginY = adsFrameOriginY;
+        _quickFlickPlacement = new TrialPlacementStrategy(
+            new Random(), gapMinPixels: QuickFlickGapMinInches * ScreenPixelsPerInch, gapMaxPixels: QuickFlickGapMaxInches * ScreenPixelsPerInch);
+        _adsQuickFlickPlacement = adsPlacement;
+        _quickFlickResults = new List<TrialResult>();
+        _adsQuickFlickResults = new List<TrialResult>();
         _trackingResults = new List<TrackingResult>();
         _strafeResults = new List<TrackingResult>();
         _tileData.Clear();
@@ -238,6 +290,47 @@ public partial class MainWindow : Window
         Focus();
     }
 
+    private void OnOpenSimulatorClicked(object sender, RoutedEventArgs e)
+    {
+        var savedSettings = UserSettings.Load();
+        var sensitivity = savedSettings?.LastRecommendedSensitivity ?? 1.0;
+        var adsMultiplier = savedSettings?.LastAdsMultiplier ?? 1.0;
+        var fov = double.TryParse(FovDegreesBox.Text, out var parsedFov) && parsedFov > 0 && parsedFov < 180
+            ? parsedFov
+            : _horizontalFovDegrees;
+
+        OpenSimulator(sensitivity, adsMultiplier, fov);
+    }
+
+    private void OnTrySimulatorClicked(object sender, RoutedEventArgs e)
+    {
+        if (!_lastCombinedSensitivity.HasValue)
+        {
+            return;
+        }
+
+        OpenSimulator(_lastCombinedSensitivity.Value, _lastAdsMultiplier ?? 1.0, _horizontalFovDegrees);
+    }
+
+    // Hands raw mouse input over to the simulator for the duration of its
+    // session and reclaims it once the simulator closes -
+    // RawMouseInputService.Attach re-targets Win32's raw input registration,
+    // which is process-wide, so only one of MainWindow/SimulationWindow can
+    // be the active target at a time.
+    private void OpenSimulator(double sensitivity, double adsMultiplier, double fovDegrees)
+    {
+        var simulationWindow = new SimulationWindow(_rawInputService, _accumulator, sensitivity, adsMultiplier, fovDegrees);
+        simulationWindow.Closed += (_, _) =>
+        {
+            _rawInputService.Attach(this);
+            Show();
+            Focus();
+        };
+
+        Hide();
+        simulationWindow.Show();
+    }
+
     private void ResetSessionState()
     {
         _hipfireController = null;
@@ -248,10 +341,19 @@ public partial class MainWindow : Window
         _slotIndex = 0;
         _trackingResults = new List<TrackingResult>();
         _strafeResults = new List<TrackingResult>();
+        _quickFlickResults = new List<TrialResult>();
+        _adsQuickFlickResults = new List<TrialResult>();
         _tileData.Clear();
         _tileElements.Clear();
         _isAdsPhase = false;
         _adsRightMouseDown = false;
+        _quickFlickActive = false;
+        _quickFlickIsAds = false;
+        _quickFlickDefinitionA = null;
+        _quickFlickDefinitionB = null;
+        _quickFlickPendingResultA = null;
+        DisarmQuickFlickTimer();
+        HideQuickFlickCountdown();
         HideAdsZoomPreviewBorder();
         TrialCanvasZoomTransform.BeginAnimation(ScaleTransform.ScaleXProperty, null);
         TrialCanvasZoomTransform.BeginAnimation(ScaleTransform.ScaleYProperty, null);
@@ -280,6 +382,11 @@ public partial class MainWindow : Window
     private void OnRandomClickSoundsToggled(object sender, RoutedEventArgs e)
     {
         ClickSoundPlayer.RandomSoundsEnabled = RandomClickSoundsCheckBox.IsChecked == true;
+    }
+
+    private void OnIncludePerpendicularAxisToggled(object sender, RoutedEventArgs e)
+    {
+        _includePerpendicularAxisData = IncludePerpendicularAxisCheckBox.IsChecked == true;
     }
 
     private void OnClickVolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -329,8 +436,90 @@ public partial class MainWindow : Window
         _totalTrialCount = (int)Math.Round(TrialCountSlider.Value);
         TrialCountValueText.Text = _totalTrialCount.ToString();
 
-        var (hipfireCount, adsCount, trackingCount, strafeCount) = TrialKindPattern.CountKinds(_totalTrialCount);
-        TrialCountBreakdownText.Text = $"{hipfireCount} hipfire, {adsCount} ADS, {trackingCount} tracking, {strafeCount} strafe";
+        var (hipfireCount, adsCount, trackingCount, _, quickFlickCount, adsQuickFlickCount) = TrialKindPattern.CountKinds(_totalTrialCount);
+        TrialCountBreakdownText.Text = $"{hipfireCount} hipfire, {adsCount} ADS, {quickFlickCount} quick flick, {adsQuickFlickCount} ADS quick flick, {trackingCount} tracking";
+    }
+
+    // Re-reads history.json and refreshes the up-to-3 "Recent Results" rows
+    // on the start screen - called at startup and again right after a fresh
+    // run is appended, so a just-finished session shows up immediately
+    // without needing an app restart.
+    private void RefreshResultHistoryDisplay()
+    {
+        _resultHistory = ResultHistoryStore.Load();
+
+        var rows = new[]
+        {
+            (Row: HistoryRow0, Summary: HistorySummary0, Settings: HistorySettings0),
+            (Row: HistoryRow1, Summary: HistorySummary1, Settings: HistorySettings1),
+            (Row: HistoryRow2, Summary: HistorySummary2, Settings: HistorySettings2),
+        };
+
+        for (var i = 0; i < rows.Length; i++)
+        {
+            var (row, summary, settings) = rows[i];
+            if (i < _resultHistory.Count)
+            {
+                var entry = _resultHistory[i];
+                summary.Text = $"{entry.Timestamp.LocalDateTime:MMM d, h:mm tt} - {entry.RecommendationSummary.Split('\n')[0]}";
+                settings.Text = $"FOV {entry.FovDegrees:F0}, DPI {entry.MouseDpi:F0}, {entry.TrialCount} trials";
+                row.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                row.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        ResultHistoryPanel.Visibility = _resultHistory.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnViewHistoryEntryClicked(object sender, RoutedEventArgs e)
+    {
+        var index = int.Parse((string)((Button)sender).Tag);
+        if (index >= _resultHistory.Count)
+        {
+            return;
+        }
+
+        var entry = _resultHistory[index];
+        _viewedHistoryEntry = entry;
+
+        StartPanel.Visibility = Visibility.Collapsed;
+        HistoryHeadingText.Text = $"Result from {entry.Timestamp.LocalDateTime:MMM d, yyyy h:mm tt}";
+        HistorySettingsUsedText.Text = $"FOV {entry.FovDegrees:F0}°, DPI {entry.MouseDpi:F0}, {entry.TrialCount} trials" +
+            (entry.IncludePerpendicularAxisData ? ", perpendicular-axis data included" : "");
+        HistoryRecommendationText.Text = entry.RecommendationSummary;
+        HistoryStatsText.Text = entry.DetailsText;
+        HistoryDetailsPanel.Visibility = Visibility.Collapsed;
+        HistoryDetailsToggleButton.Content = "▾ More details";
+        HistoryTrySimulatorButton.IsEnabled = entry.CombinedSensitivity.HasValue;
+
+        FadeIn(HistoryDetailPanel);
+    }
+
+    private void OnHistoryDetailsToggleClicked(object sender, RoutedEventArgs e)
+    {
+        var expanding = HistoryDetailsPanel.Visibility != Visibility.Visible;
+        HistoryDetailsPanel.Visibility = expanding ? Visibility.Visible : Visibility.Collapsed;
+        HistoryDetailsToggleButton.Content = expanding ? "▴ Hide details" : "▾ More details";
+    }
+
+    private void OnHistoryTrySimulatorClicked(object sender, RoutedEventArgs e)
+    {
+        if (_viewedHistoryEntry?.CombinedSensitivity is not double sensitivity)
+        {
+            return;
+        }
+
+        OpenSimulator(sensitivity, _viewedHistoryEntry.AdsMultiplier ?? 1.0, _viewedHistoryEntry.FovDegrees);
+    }
+
+    private void OnHistoryBackClicked(object sender, RoutedEventArgs e)
+    {
+        HistoryDetailPanel.Visibility = Visibility.Collapsed;
+        _viewedHistoryEntry = null;
+        FadeIn(StartPanel);
     }
 
     private static void FadeIn(UIElement element)
@@ -365,6 +554,8 @@ public partial class MainWindow : Window
         TrialPanel.Visibility = Visibility.Collapsed;
         TrackingPanel.Visibility = Visibility.Collapsed;
         ResultsPanel.Visibility = Visibility.Collapsed;
+        HistoryDetailPanel.Visibility = Visibility.Collapsed;
+        _viewedHistoryEntry = null;
         FadeIn(StartPanel);
 
         Focus();
@@ -401,6 +592,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_quickFlickActive)
+        {
+            HandleQuickFlickClick(e);
+            return;
+        }
+
         if (_runner == null || _controller == null)
         {
             return;
@@ -430,8 +627,8 @@ public partial class MainWindow : Window
 
             case TrialState.AwaitingFeelClick:
                 ClickSoundPlayer.PlayClick();
-                var impliedDegrees = ComputeImpliedDegrees(_runner.Definition);
-                _runner.OnFeelClicked(impliedDegrees);
+                var (impliedDegrees, perpendicularImpliedDegrees) = ComputeImpliedDegrees(_runner.Definition, _isAdsPhase);
+                _runner.OnFeelClicked(impliedDegrees, perpendicularImpliedDegrees);
                 CenterCursor();
                 Cursor = Cursors.Arrow;
                 HidePrompt();
@@ -461,6 +658,20 @@ public partial class MainWindow : Window
         if (e.ChangedButton == MouseButton.Right)
         {
             _adsRightMouseDown = false;
+
+            if (_quickFlickActive && _quickFlickIsAds)
+            {
+                if (_runner?.State == TrialState.AwaitingFeelClick)
+                {
+                    BeginAdsZoomOut(RestartQuickFlickTrial);
+                }
+                else if (_runner?.State == TrialState.AwaitingTargetAClick)
+                {
+                    BeginAdsZoomOut(() => { });
+                }
+
+                return;
+            }
 
             if (_isAdsPhase && _runner?.State == TrialState.AwaitingFeelClick)
             {
@@ -627,23 +838,29 @@ public partial class MainWindow : Window
         ResultsHeadingText.Text = "Calibration Results";
 
         var profile = new ApexLegendsProfile();
-        var hipfireFlick = SessionSummaryBuilder.Build(_hipfireController!.Results, profile);
-        var adsFlick = SessionSummaryBuilder.Build(_adsController!.Results, profile);
+        var hipfireFlick = SessionSummaryBuilder.Build(_hipfireController!.Results, profile, _includePerpendicularAxisData);
+        var adsFlick = SessionSummaryBuilder.Build(_adsController!.Results, profile, _includePerpendicularAxisData);
+        var quickFlick = SessionSummaryBuilder.Build(_quickFlickResults, profile, _includePerpendicularAxisData);
+        var adsQuickFlick = SessionSummaryBuilder.Build(_adsQuickFlickResults, profile, _includePerpendicularAxisData);
         var trackingSummary = TrackingSessionSummaryBuilder.Build(_trackingResults, profile);
 
         double? flickSens = hipfireFlick.ErrorMessage == null ? hipfireFlick.RecommendedSensitivity : null;
-        double? flickMultiplier = hipfireFlick.ErrorMessage == null && adsFlick.ErrorMessage == null
-            ? adsFlick.RecommendedSensitivity!.Value / hipfireFlick.RecommendedSensitivity!.Value
-            : null;
-
+        double? quickFlickSens = quickFlick.ErrorMessage == null ? quickFlick.RecommendedSensitivity : null;
         double? trackingSens = trackingSummary.ErrorMessage == null ? trackingSummary.RecommendedSensitivity : null;
+        double? adsFlickSens = adsFlick.ErrorMessage == null ? adsFlick.RecommendedSensitivity : null;
+        double? adsQuickFlickSens = adsQuickFlick.ErrorMessage == null ? adsQuickFlick.RecommendedSensitivity : null;
 
-        // The flick test and the tracking test independently estimate the
+        // The flick tests and the tracking test independently estimate the
         // same underlying feel - average whichever ones succeeded into one
-        // headline number instead of showing two recommendations to reconcile.
-        var sensEstimates = new[] { flickSens, trackingSens }.Where(v => v.HasValue).Select(v => v!.Value).ToList();
+        // headline number instead of showing several recommendations to
+        // reconcile. Quick flick's rushed, blind clicks are deliberately
+        // noisier than Hipfire's - that's the point, not a bug - so they
+        // pull the estimate around rather than just sitting beside it.
+        var sensEstimates = new[] { flickSens, quickFlickSens, trackingSens }.Where(v => v.HasValue).Select(v => v!.Value).ToList();
+        var adsSensEstimates = new[] { adsFlickSens, adsQuickFlickSens }.Where(v => v.HasValue).Select(v => v!.Value).ToList();
 
         var lines = new List<string>();
+        double? combinedSens = null;
 
         if (sensEstimates.Count == 0)
         {
@@ -651,11 +868,24 @@ public partial class MainWindow : Window
         }
         else
         {
-            var combinedSens = sensEstimates.Average();
-            var cm360 = 360.0 * 2.54 / (_mouseDpi!.Value * combinedSens * ApexLegendsProfile.MYaw);
-            lines.Add($"Recommended Apex Legends sensitivity: {combinedSens:F3}");
+            // Rounded to 2 decimal places here (not just at display time) since
+            // Apex's sensitivity field doesn't accept finer precision than that
+            // (e.g. 1.523 gets truncated to 1.52) - every downstream use of this
+            // value (cm/360 below, the simulator, persisted settings) should
+            // reflect the number the player will actually type in, not the
+            // unrounded average.
+            combinedSens = Math.Round(sensEstimates.Average(), 2);
+            var cm360 = 360.0 * 2.54 / (_mouseDpi!.Value * combinedSens.Value * ApexLegendsProfile.MYaw);
+            lines.Add($"Recommended Apex Legends sensitivity: {combinedSens:F2}");
             lines.Add($"(~{cm360:F1} cm/360 at {_mouseDpi:F0} DPI)");
         }
+
+        // Same averaging idea on the ADS side: combine whichever of ADS /
+        // ADS quick flick succeeded into one sensitivity before taking the
+        // ratio, instead of only ever comparing the original two trial types.
+        double? flickMultiplier = combinedSens.HasValue && adsSensEstimates.Count > 0
+            ? Math.Round(adsSensEstimates.Average() / combinedSens.Value, 2)
+            : null;
 
         if (flickMultiplier == null)
         {
@@ -666,7 +896,19 @@ public partial class MainWindow : Window
             lines.Add($"Recommended ADS sensitivity multiplier: {flickMultiplier:F2}");
         }
 
-        var straightnessValues = hipfireFlick.StraightnessStats.RawValues.Concat(adsFlick.StraightnessStats.RawValues).ToList();
+        // Stashed for the "Try It in 3D" button below and persisted so the
+        // simulator can also be opened straight from the start screen later,
+        // without needing a fresh calibration run first.
+        _lastCombinedSensitivity = combinedSens;
+        _lastAdsMultiplier = flickMultiplier;
+        TrySimulatorButton.IsEnabled = combinedSens.HasValue;
+        new UserSettings(_horizontalFovDegrees, _mouseDpi ?? 800.0, ClickVolumeSlider.Value / 100.0, _totalTrialCount, combinedSens, flickMultiplier).Save();
+
+        var straightnessValues = hipfireFlick.StraightnessStats.RawValues
+            .Concat(adsFlick.StraightnessStats.RawValues)
+            .Concat(quickFlick.StraightnessStats.RawValues)
+            .Concat(adsQuickFlick.StraightnessStats.RawValues)
+            .ToList();
         if (straightnessValues.Count > 0)
         {
             var avgStraightness = straightnessValues.Average();
@@ -679,14 +921,22 @@ public partial class MainWindow : Window
         sb.AppendLine($"Horizontal FOV: {_horizontalFovDegrees:F0} degrees");
         sb.AppendLine();
         sb.AppendLine("Combined above from whichever of these succeeded:");
-        sb.AppendLine($"  Flick-based:    sensitivity={flickSens?.ToString("F3") ?? "n/a"}  ADS multiplier={flickMultiplier?.ToString("F2") ?? "n/a"}");
-        sb.AppendLine($"  Tracking-based: sensitivity={trackingSens?.ToString("F3") ?? "n/a"}");
+        sb.AppendLine($"  Flick-based:    sensitivity={flickSens?.ToString("F2") ?? "n/a"}  ADS multiplier={flickMultiplier?.ToString("F2") ?? "n/a"}");
+        sb.AppendLine($"  Quick flick:    sensitivity={quickFlickSens?.ToString("F2") ?? "n/a"}");
+        sb.AppendLine($"  Tracking-based: sensitivity={trackingSens?.ToString("F2") ?? "n/a"}");
         sb.AppendLine();
         sb.AppendLine("=== Flick test: Hipfire ===");
         AppendSessionStats(sb, hipfireFlick);
         sb.AppendLine();
         sb.AppendLine("=== Flick test: ADS (right mouse held) ===");
         AppendSessionStats(sb, adsFlick);
+        sb.AppendLine();
+        var quickFlickDeadlineLabel = $"{QuickFlickTimerDuration.TotalSeconds:0.##}s deadline per target";
+        sb.AppendLine($"=== Flick test: Quick Flick ({quickFlickDeadlineLabel}) ===");
+        AppendSessionStats(sb, quickFlick);
+        sb.AppendLine();
+        sb.AppendLine($"=== Flick test: ADS Quick Flick (right mouse held, {quickFlickDeadlineLabel}) ===");
+        AppendSessionStats(sb, adsQuickFlick);
         sb.AppendLine();
         sb.AppendLine("=== Tracking test ===");
         AppendTrackingSessionStats(sb, trackingSummary, _trackingResults);
@@ -695,6 +945,18 @@ public partial class MainWindow : Window
         AppendStrafeSessionStats(sb, _strafeResults);
 
         StatsText.Text = sb.ToString();
+
+        ResultHistoryStore.Add(new ResultHistoryEntry(
+            DateTimeOffset.Now,
+            _horizontalFovDegrees,
+            _mouseDpi ?? 800.0,
+            _totalTrialCount,
+            _includePerpendicularAxisData,
+            RecommendationText.Text,
+            StatsText.Text,
+            combinedSens,
+            flickMultiplier));
+        RefreshResultHistoryDisplay();
 
         ResultsPanel.UpdateLayout();
         BuildTraceTileCanvas();
@@ -837,17 +1099,33 @@ public partial class MainWindow : Window
             : "You're lagging noticeably behind direction changes - a touch more sensitivity or some focused practice on anticipating reversals could help.");
     }
 
-    private double ComputeImpliedDegrees(TrialDefinition definition)
+    // Computes both axes unconditionally (not just the trial's own dominant
+    // axis) so the perpendicular-axis toggle has a real angular gap to work
+    // with - every trial has incidental off-axis movement too, this just
+    // measures it the same way as the dominant axis instead of only as drift.
+    // isAds: ADS targets live in a centered sub-frame (Width/AdsZoomScale x
+    // Height/AdsZoomScale, see OnBeginClicked) that gets visually zoomed back
+    // up to fill the screen - so the FOV math has to project through that
+    // sub-frame's own dimensions and a correspondingly narrowed FOV (same
+    // zoom-narrows-FOV model as Simulation/ScopeOption.ScopedFov), not the
+    // full screen/FOV, or the implied angle comes out too small for the gap
+    // the player actually perceived.
+    private (double Dominant, double Perpendicular) ComputeImpliedDegrees(TrialDefinition definition, bool isAds)
     {
-        if (definition.Direction is Direction.LeftToRight or Direction.RightToLeft)
-        {
-            return FieldOfViewProjection.DegreesBetween(
-                definition.TargetAPosition.X, definition.TargetBPosition.X, Width, _horizontalFovDegrees);
-        }
+        var fov = isAds ? _horizontalFovDegrees / AdsZoomScale : _horizontalFovDegrees;
+        var width = isAds ? _adsFrameWidth : Width;
+        var height = isAds ? _adsFrameHeight : Height;
+        var originX = isAds ? _adsFrameOriginX : 0.0;
+        var originY = isAds ? _adsFrameOriginY : 0.0;
 
-        var verticalFov = FieldOfViewProjection.DeriveVerticalFov(_horizontalFovDegrees, Width, Height);
-        return FieldOfViewProjection.DegreesBetween(
-            definition.TargetAPosition.Y, definition.TargetBPosition.Y, Height, verticalFov);
+        var horizontalDegrees = FieldOfViewProjection.DegreesBetween(
+            definition.TargetAPosition.X - originX, definition.TargetBPosition.X - originX, width, fov);
+        var verticalFov = FieldOfViewProjection.DeriveVerticalFov(fov, width, height);
+        var verticalDegrees = FieldOfViewProjection.DegreesBetween(
+            definition.TargetAPosition.Y - originY, definition.TargetBPosition.Y - originY, height, verticalFov);
+
+        var isHorizontal = definition.Direction is Direction.LeftToRight or Direction.RightToLeft;
+        return isHorizontal ? (horizontalDegrees, verticalDegrees) : (verticalDegrees, horizontalDegrees);
     }
 
     // Always zooms in on screen center by AdsZoomScale - safe because ADS
@@ -995,6 +1273,12 @@ public partial class MainWindow : Window
             case TrialKind.Strafe:
                 EnterStrafeSlot();
                 break;
+            case TrialKind.QuickFlick:
+                EnterQuickFlickSlot(isAds: false);
+                break;
+            case TrialKind.AdsQuickFlick:
+                EnterQuickFlickSlot(isAds: true);
+                break;
             default:
                 EnterFlickSlot(isAds: kind == TrialKind.Ads);
                 break;
@@ -1027,6 +1311,284 @@ public partial class MainWindow : Window
         }
 
         StartNextTrial();
+    }
+
+    private void EnterQuickFlickSlot(bool isAds)
+    {
+        _quickFlickActive = true;
+        _quickFlickIsAds = isAds;
+        _isAdsPhase = isAds;
+        _adsRightMouseDown = false;
+        _controller = null;
+        _runner = null;
+
+        TrackingPanel.Visibility = Visibility.Collapsed;
+        if (TrialPanel.Visibility != Visibility.Visible)
+        {
+            FadeIn(TrialPanel);
+        }
+
+        StartNewQuickFlickAttempt();
+    }
+
+    // Generates a fresh 3-point chain (P1 untimed, P2/P3 each under their own
+    // deadline) and presents only the first, untimed target - called both to
+    // start a slot and to retry it after a miss, since a miss regenerates
+    // every position rather than just resetting state.
+    private void StartNewQuickFlickAttempt()
+    {
+        var placement = _quickFlickIsAds ? _adsQuickFlickPlacement! : _quickFlickPlacement!;
+        var width = _quickFlickIsAds ? _adsFrameWidth : Width;
+        var height = _quickFlickIsAds ? _adsFrameHeight : Height;
+
+        var p1 = placement.GenerateRandomPoint(width, height);
+        var (p2, dirA) = placement.GenerateNextPoint(p1, width, height);
+        var (p3, dirB) = placement.GenerateNextPoint(p2, width, height);
+
+        _quickFlickDefinitionA = new TrialDefinition(_slotIndex, dirA, p1, p2);
+        _quickFlickDefinitionB = new TrialDefinition(_slotIndex, dirB, p2, p3);
+        _quickFlickSegment = 1;
+        _quickFlickPendingResultA = null;
+        _runner = new TrialRunner(_accumulator, _quickFlickDefinitionA);
+
+        PresentQuickFlickAttempt();
+    }
+
+    private void PresentQuickFlickAttempt()
+    {
+        var targetDiameter = _quickFlickIsAds ? (DefaultTargetDiameter / AdsZoomScale) : DefaultTargetDiameter;
+        TargetEllipse.Width = targetDiameter;
+        TargetEllipse.Height = targetDiameter;
+        TargetBEllipse.Width = targetDiameter;
+        TargetBEllipse.Height = targetDiameter;
+        TargetBGhostEllipse.Width = targetDiameter;
+        TargetBGhostEllipse.Height = targetDiameter;
+
+        TargetEllipse.Fill = _quickFlickIsAds ? AdsQuickFlickActiveBrush : QuickFlickActiveBrush;
+        ((DropShadowEffect)TargetEllipse.Effect).Color = _quickFlickIsAds ? AdsQuickFlickGlowColor : QuickFlickGlowColor;
+        RepositionTargetA(_quickFlickDefinitionA!.TargetAPosition);
+        TargetEllipse.Visibility = Visibility.Visible;
+
+        TargetBEllipse.Fill = _quickFlickIsAds ? AdsQuickFlickActiveBrush : QuickFlickActiveBrush;
+        ((DropShadowEffect)TargetBEllipse.Effect).Color = _quickFlickIsAds ? AdsQuickFlickGlowColor : QuickFlickGlowColor;
+        TargetBEllipse.Visibility = Visibility.Collapsed;
+        TargetBGhostEllipse.Fill = _quickFlickIsAds ? AdsQuickFlickGhostBrush : QuickFlickGhostBrush;
+        HideQuickFlickCountdown();
+
+        Cursor = Cursors.Arrow;
+        PromptText.Text = _quickFlickIsAds ? "Hold right mouse, then click the target" : "Click the target";
+        PromptSubText.Text = string.Empty;
+        PromptPanel.Visibility = Visibility.Visible;
+
+        var prefix = _quickFlickIsAds ? "ADS Quick Flick Trial" : "Quick Flick Trial";
+        ProgressText.Text = $"{prefix} {_slotIndex + 1} / {_totalTrialCount}";
+
+        if (_quickFlickIsAds)
+        {
+            ShowAdsZoomPreviewBorder();
+        }
+        else
+        {
+            HideAdsZoomPreviewBorder();
+        }
+    }
+
+    private void HandleQuickFlickClick(MouseButtonEventArgs e)
+    {
+        if (_quickFlickIsAds && !_adsRightMouseDown)
+        {
+            return;
+        }
+
+        switch (_runner!.State)
+        {
+            case TrialState.AwaitingTargetAClick:
+            {
+                var clickPosition = e.GetPosition(TrialCanvas);
+                var hitRadius = _quickFlickIsAds ? (TargetHitRadius / AdsZoomScale) : TargetHitRadius;
+                if (!IsWithinTarget(clickPosition, _runner.Definition.TargetAPosition, hitRadius))
+                {
+                    return;
+                }
+
+                ClickSoundPlayer.PlayClick();
+                _runner.OnTargetAClicked();
+                Cursor = Cursors.None;
+                DimQuickFlickTargetA();
+                ShowTargetB(_runner.Definition.TargetBPosition);
+                ShowQuickFlickGhost(_runner.Definition.TargetBPosition);
+                ArmQuickFlickTimer();
+                StartQuickFlickShrinkAnimation();
+                ShowQuickFlickSecondClickPrompt();
+                break;
+            }
+
+            case TrialState.AwaitingFeelClick:
+            {
+                // No hit-test - this is a blind "feel" click exactly like
+                // Hipfire/ADS today; the deadline (not a missed click) is
+                // what fails this stage.
+                ClickSoundPlayer.PlayClick();
+                DisarmQuickFlickTimer();
+                HideQuickFlickCountdown();
+                var (impliedDegrees, perpendicularImpliedDegrees) = ComputeImpliedDegrees(_runner.Definition, _quickFlickIsAds);
+                _runner.OnFeelClicked(impliedDegrees, perpendicularImpliedDegrees);
+                CenterCursor();
+
+                if (_quickFlickSegment == 1)
+                {
+                    _quickFlickPendingResultA = _runner.Result!;
+                    _quickFlickSegment = 2;
+                    RepositionTargetA(_quickFlickDefinitionB!.TargetAPosition);
+                    _runner = new TrialRunner(_accumulator, _quickFlickDefinitionB);
+                    _runner.OnTargetAClicked();
+                    ShowTargetB(_quickFlickDefinitionB.TargetBPosition);
+                    ShowQuickFlickGhost(_quickFlickDefinitionB.TargetBPosition);
+                    ArmQuickFlickTimer();
+                    StartQuickFlickShrinkAnimation();
+                }
+                else
+                {
+                    CompleteQuickFlickTrial(_quickFlickPendingResultA!, _runner.Result!);
+                }
+
+                break;
+            }
+        }
+    }
+
+    private void RepositionTargetA(ScreenPoint position)
+    {
+        Canvas.SetLeft(TargetEllipse, position.X - (TargetEllipse.Width / 2));
+        Canvas.SetTop(TargetEllipse, position.Y - (TargetEllipse.Height / 2));
+    }
+
+    private void DimQuickFlickTargetA()
+    {
+        TargetEllipse.Fill = _quickFlickIsAds ? AdsQuickFlickDimmedBrush : QuickFlickDimmedBrush;
+    }
+
+    private void ShowQuickFlickSecondClickPrompt()
+    {
+        PromptText.Text = _quickFlickIsAds ? "Hold RMB - quick, flick to it!" : "Quick - flick to it!";
+        PromptSubText.Text = $"You have {QuickFlickTimerDuration.TotalSeconds:0.##}s - the full faint circle is clickable the whole time, the bright highlight shrinking is just the timer. You won't see your cursor, so commit to the gap you see and go.";
+        PromptPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ArmQuickFlickTimer()
+    {
+        _quickFlickTimer = new DispatcherTimer { Interval = QuickFlickTimerDuration };
+        _quickFlickTimer.Tick += OnQuickFlickTimerExpired;
+        _quickFlickTimer.Start();
+    }
+
+    private void DisarmQuickFlickTimer()
+    {
+        if (_quickFlickTimer == null)
+        {
+            return;
+        }
+
+        _quickFlickTimer.Stop();
+        _quickFlickTimer.Tick -= OnQuickFlickTimerExpired;
+        _quickFlickTimer = null;
+    }
+
+    private void OnQuickFlickTimerExpired(object? sender, EventArgs e)
+    {
+        DisarmQuickFlickTimer();
+
+        if (_quickFlickIsAds)
+        {
+            BeginAdsZoomOut(RestartQuickFlickTrial);
+        }
+        else
+        {
+            RestartQuickFlickTrial();
+        }
+    }
+
+    // No partial credit on a miss - a slot only ever contributes data to
+    // _quickFlickResults/_adsQuickFlickResults once it fully succeeds, so a
+    // player needing many retries doesn't end up over-represented in the
+    // sample relative to one who clears it on the first try.
+    private void RestartQuickFlickTrial()
+    {
+        CenterCursor();
+        Cursor = Cursors.Arrow;
+        HidePrompt();
+        HideResultFeedback();
+        TargetBEllipse.Visibility = Visibility.Collapsed;
+        HideQuickFlickCountdown();
+        _quickFlickPendingResultA = null;
+
+        StartNewQuickFlickAttempt();
+    }
+
+    private void CompleteQuickFlickTrial(TrialResult resultA, TrialResult resultB)
+    {
+        var kind = _quickFlickIsAds ? TrialKind.AdsQuickFlick : TrialKind.QuickFlick;
+        var resultsList = _quickFlickIsAds ? _adsQuickFlickResults : _quickFlickResults;
+        resultsList.Add(resultA);
+        resultsList.Add(resultB);
+        _tileData.Add(new QuickFlickTile(kind, _quickFlickDefinitionA!, resultA, _quickFlickDefinitionB!, resultB));
+
+        CenterCursor();
+        Cursor = Cursors.Arrow;
+        HidePrompt();
+        HideResultFeedback();
+        TargetEllipse.Visibility = Visibility.Collapsed;
+        TargetBEllipse.Visibility = Visibility.Collapsed;
+        HideQuickFlickCountdown();
+        _quickFlickActive = false;
+        _quickFlickPendingResultA = null;
+
+        if (_quickFlickIsAds)
+        {
+            BeginAdsZoomOut(AdvanceToNextSlot);
+        }
+        else
+        {
+            AdvanceToNextSlot();
+        }
+    }
+
+    // The deadline itself is purely time-based (there's no hit-test to
+    // "beat" on the blind click) - TargetBEllipse shrinking is just the
+    // visual cue of that same deadline, timed to finish exactly when it
+    // fires. TargetBGhostEllipse is the actual full-size clickable area,
+    // shown the whole time on top of it, so the shrink reads as a countdown
+    // highlight rather than the real target disappearing.
+    private void StartQuickFlickShrinkAnimation()
+    {
+        TargetBEllipseScaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1.0, 0.0, QuickFlickTimerDuration));
+        TargetBEllipseScaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1.0, 0.0, QuickFlickTimerDuration));
+    }
+
+    private void ResetQuickFlickShrinkAnimation()
+    {
+        TargetBEllipseScaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        TargetBEllipseScaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        TargetBEllipseScaleTransform.ScaleX = 1.0;
+        TargetBEllipseScaleTransform.ScaleY = 1.0;
+    }
+
+    private void ShowQuickFlickGhost(ScreenPoint position)
+    {
+        Canvas.SetLeft(TargetBGhostEllipse, position.X - (TargetBGhostEllipse.Width / 2));
+        Canvas.SetTop(TargetBGhostEllipse, position.Y - (TargetBGhostEllipse.Height / 2));
+        TargetBGhostEllipse.Visibility = Visibility.Visible;
+    }
+
+    private void HideQuickFlickGhost()
+    {
+        TargetBGhostEllipse.Visibility = Visibility.Collapsed;
+    }
+
+    private void HideQuickFlickCountdown()
+    {
+        ResetQuickFlickShrinkAnimation();
+        HideQuickFlickGhost();
     }
 
     private void EnterTrackingSlot()

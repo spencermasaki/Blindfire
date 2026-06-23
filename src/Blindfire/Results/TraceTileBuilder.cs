@@ -24,6 +24,8 @@ public static class TraceTileBuilder
     private static readonly Color HipfireBColor = Color.FromRgb(0x3D, 0xA9, 0xFC);
     private static readonly Color AdsAColor = Color.FromRgb(0xB1, 0x4E, 0xFF);
     private static readonly Color AdsBColor = Color.FromRgb(0xFF, 0x4F, 0xD8);
+    private static readonly Color QuickFlickColor = Color.FromRgb(0xFF, 0xD2, 0x3F);
+    private static readonly Color AdsQuickFlickColor = Color.FromRgb(0x00, 0xE5, 0xFF);
     private static readonly Color TrackingTargetColor = Color.FromRgb(0xFF, 0xB0, 0x20);
     private static readonly Color StrafeTargetColor = Color.FromRgb(0x2E, 0xCC, 0x71);
     private static readonly Color TraceLineColor = Colors.White;
@@ -55,6 +57,7 @@ public static class TraceTileBuilder
             var (lines, markers, missDistance) = tiles[i] switch
             {
                 FlickTile flick => BuildFlickGeometry(flick),
+                QuickFlickTile quickFlick => BuildQuickFlickGeometry(quickFlick),
                 TrackingTile tracking => BuildHoldGeometry(tracking.Result, TrackingTargetColor, screenWidth, screenHeight, horizontalFovDegrees, verticalFovDegrees),
                 StrafeTile strafe => BuildHoldGeometry(strafe.Result, StrafeTargetColor, screenWidth, screenHeight, horizontalFovDegrees, verticalFovDegrees),
                 _ => (new List<TraceLine>(), new List<Marker>(), 0.0),
@@ -67,7 +70,7 @@ public static class TraceTileBuilder
         var borders = new Border[count];
         for (var i = 0; i < count; i++)
         {
-            var isFlick = tiles[i].Kind is TrialKind.Hipfire or TrialKind.Ads;
+            var isFlick = tiles[i].Kind is TrialKind.Hipfire or TrialKind.Ads or TrialKind.QuickFlick or TrialKind.AdsQuickFlick;
             var transform = isFlick ? BuildCenteredTransform(geometries[i], placements[i], flickScale) : null;
             borders[i] = BuildVisual(placements[i], geometries[i].Lines, geometries[i].Markers, transform, geometries[i].MissDistancePixels);
         }
@@ -82,7 +85,45 @@ public static class TraceTileBuilder
     private static (List<TraceLine>, List<Marker>, double) BuildFlickGeometry(FlickTile flick)
     {
         var definition = flick.Definition;
-        var result = flick.Result;
+        var (line, missDistance) = BuildFlickTraceLine(definition, flick.Result);
+        var (aColor, bColor) = flick.Kind == TrialKind.Ads ? (AdsAColor, AdsBColor) : (HipfireAColor, HipfireBColor);
+
+        var lines = new List<TraceLine> { line };
+        var markers = new List<Marker>
+        {
+            new(new Point(definition.TargetAPosition.X, definition.TargetAPosition.Y), aColor),
+            new(new Point(definition.TargetBPosition.X, definition.TargetBPosition.Y), bColor),
+        };
+
+        return (lines, markers, missDistance);
+    }
+
+    // Quick flick's chain is two flicks back to back (P1->P2->P3) sharing one
+    // tile - same trace math as a regular flick, run twice and anchored to
+    // each segment's own start point, with all 3 targets marked.
+    private static (List<TraceLine>, List<Marker>, double) BuildQuickFlickGeometry(QuickFlickTile quickFlick)
+    {
+        var color = quickFlick.Kind == TrialKind.AdsQuickFlick ? AdsQuickFlickColor : QuickFlickColor;
+        var (lineA, missA) = BuildFlickTraceLine(quickFlick.DefinitionA, quickFlick.ResultA);
+        var (lineB, missB) = BuildFlickTraceLine(quickFlick.DefinitionB, quickFlick.ResultB);
+
+        var p1 = quickFlick.DefinitionA.TargetAPosition;
+        var p2 = quickFlick.DefinitionA.TargetBPosition;
+        var p3 = quickFlick.DefinitionB.TargetBPosition;
+
+        var lines = new List<TraceLine> { lineA, lineB };
+        var markers = new List<Marker>
+        {
+            new(new Point(p1.X, p1.Y), color),
+            new(new Point(p2.X, p2.Y), color),
+            new(new Point(p3.X, p3.Y), color),
+        };
+
+        return (lines, markers, (missA + missB) / 2.0);
+    }
+
+    private static (TraceLine Line, double MissDistance) BuildFlickTraceLine(TrialDefinition definition, TrialResult result)
+    {
         var isHorizontal = definition.Direction is Direction.LeftToRight or Direction.RightToLeft;
 
         var dominantRaw = isHorizontal ? result.RawDx : result.RawDy;
@@ -95,20 +136,11 @@ public static class TraceTileBuilder
             .Select(p => new Point(definition.TargetAPosition.X + (scale * p.X), definition.TargetAPosition.Y + (scale * p.Y)))
             .ToList();
 
-        var (aColor, bColor) = flick.Kind == TrialKind.Ads ? (AdsAColor, AdsBColor) : (HipfireAColor, HipfireBColor);
-
         var targetB = new Point(definition.TargetBPosition.X, definition.TargetBPosition.Y);
         var finalPoint = tracePoints.Count > 0 ? tracePoints[^1] : new Point(definition.TargetAPosition.X, definition.TargetAPosition.Y);
         var missDistance = Distance(finalPoint, targetB);
 
-        var lines = new List<TraceLine> { new(tracePoints, TraceLineColor) };
-        var markers = new List<Marker>
-        {
-            new(new Point(definition.TargetAPosition.X, definition.TargetAPosition.Y), aColor),
-            new(new Point(definition.TargetBPosition.X, definition.TargetBPosition.Y), bColor),
-        };
-
-        return (lines, markers, missDistance);
+        return (new TraceLine(tracePoints, TraceLineColor), missDistance);
     }
 
     // The target's path is already absolute screen pixels - used as-is. The
@@ -171,7 +203,7 @@ public static class TraceTileBuilder
 
         for (var i = 0; i < count; i++)
         {
-            if (tiles[i].Kind is not (TrialKind.Hipfire or TrialKind.Ads))
+            if (tiles[i].Kind is not (TrialKind.Hipfire or TrialKind.Ads or TrialKind.QuickFlick or TrialKind.AdsQuickFlick))
             {
                 continue;
             }

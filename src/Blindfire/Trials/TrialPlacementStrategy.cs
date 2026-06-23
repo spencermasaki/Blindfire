@@ -40,14 +40,48 @@ public sealed class TrialPlacementStrategy
     public (ScreenPoint TargetA, ScreenPoint NominalB) GeneratePositions(Direction direction, double screenWidth, double screenHeight)
     {
         var (targetA, nominalB) = GenerateLocalPositions(direction, screenWidth, screenHeight);
-        if (_originX == 0.0 && _originY == 0.0)
+        return (Translate(targetA), Translate(nominalB));
+    }
+
+    // A free-standing point anywhere within the margin - used as the lead-in
+    // point of a chain (quick flick) that has no fixed "opposite zone" to
+    // anchor against like GeneratePositions's edge-to-edge layout does.
+    public ScreenPoint GenerateRandomPoint(double width, double height)
+    {
+        var local = new ScreenPoint(RandomInRange(_edgeMargin, width - _edgeMargin), RandomInRange(_edgeMargin, height - _edgeMargin));
+        return Translate(local);
+    }
+
+    // Picks a fresh random direction and gap (reusing the same gap-range
+    // fields GenerateCloseGap reads) from a given point, instead of
+    // GeneratePositions's fixed edge-zone-to-edge-zone layout - used to chain
+    // several flicks back-to-back (quick flick). Flips toward whichever side
+    // actually has room if the random direction would run past the margin.
+    public (ScreenPoint Point, Direction Direction) GenerateNextPoint(ScreenPoint from, double width, double height)
+    {
+        var gapMin = _gapMinPixels ?? throw new InvalidOperationException("GenerateNextPoint requires a configured gap range.");
+        var gapMax = _gapMaxPixels ?? throw new InvalidOperationException("GenerateNextPoint requires a configured gap range.");
+
+        var local = Untranslate(from);
+        var gap = RandomInRange(gapMin, gapMax);
+        var jitter = gap * CloseGapPerpendicularJitterRatio;
+
+        if (_random.NextDouble() < 0.5)
         {
-            return (targetA, nominalB);
+            var canGoRight = local.X + gap <= width - _edgeMargin;
+            var canGoLeft = local.X - gap >= _edgeMargin;
+            var goRight = canGoRight && (!canGoLeft || _random.NextDouble() < 0.5);
+            var nextX = goRight ? local.X + gap : local.X - gap;
+            var nextY = Clamp(local.Y + RandomInRange(-jitter, jitter), _edgeMargin, height - _edgeMargin);
+            return (Translate(new ScreenPoint(nextX, nextY)), goRight ? Direction.LeftToRight : Direction.RightToLeft);
         }
 
-        return (
-            new ScreenPoint(targetA.X + _originX, targetA.Y + _originY),
-            new ScreenPoint(nominalB.X + _originX, nominalB.Y + _originY));
+        var canGoDown = local.Y + gap <= height - _edgeMargin;
+        var canGoUp = local.Y - gap >= _edgeMargin;
+        var goDown = canGoDown && (!canGoUp || _random.NextDouble() < 0.5);
+        var nextYVertical = goDown ? local.Y + gap : local.Y - gap;
+        var nextXVertical = Clamp(local.X + RandomInRange(-jitter, jitter), _edgeMargin, width - _edgeMargin);
+        return (Translate(new ScreenPoint(nextXVertical, nextYVertical)), goDown ? Direction.UpToDown : Direction.DownToUp);
     }
 
     private (ScreenPoint, ScreenPoint) GenerateLocalPositions(Direction direction, double screenWidth, double screenHeight)
@@ -130,6 +164,12 @@ public sealed class TrialPlacementStrategy
 
         return (new ScreenPoint(startX, startY), new ScreenPoint(endX, endY));
     }
+
+    private ScreenPoint Translate(ScreenPoint point) =>
+        _originX == 0.0 && _originY == 0.0 ? point : new ScreenPoint(point.X + _originX, point.Y + _originY);
+
+    private ScreenPoint Untranslate(ScreenPoint point) =>
+        _originX == 0.0 && _originY == 0.0 ? point : new ScreenPoint(point.X - _originX, point.Y - _originY);
 
     private double RandomInRange(double min, double max)
     {
